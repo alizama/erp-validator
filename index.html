@@ -489,8 +489,12 @@ async function fetchCompras(c) {
   if (c.grupo) p.grupoPartida = c.grupo;
   const raw = await apiGet('/ReportesContables/ingresos-compras', p, c);
   const list = Array.isArray(raw) ? raw : (raw?.ingresos ?? raw?.data ?? raw?.items ?? []);
-  log(`  Compras: ${list.length} documentos`, 'ok');
-  return list;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const filtrada = list.filter(d => (d.fechaIngreso ?? '').slice(0, 10) < hoy);
+  const omitidos = list.length - filtrada.length;
+  if (omitidos > 0) log(`  ⚠ ${omitidos} doc(s) omitido(s) — fechaIngreso = hoy (${hoy})`, 'warn');
+  log(`  Compras: ${filtrada.length} documentos`, 'ok');
+  return filtrada;
 }
 
 async function fetchIngresos(c) {
@@ -730,7 +734,7 @@ async function runVal() {
     return {
       idDoc: comp.idDocumento, ndoc: comp.numeroDocumento,
       proveedor: comp.proveedor, centroCosto: comp.centroCostosDestinoNombre,
-      tipo, fechaDoc: (comp.fechaDocumento ?? '').slice(0, 10),
+      tipo, fechaDoc: (comp.fechaIngreso ?? comp.fechaDocumento ?? '').slice(0, 10),
       grabado, iva, retencion, total,
       okMat, okIva, okCxp, okKx, okCont,
       errores,
