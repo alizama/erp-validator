@@ -338,24 +338,13 @@ async function msalLogin() {
     alert('MSAL no inicializado. Revisa la consola (F12).');
     return;
   }
-  try {
-    // loginPopup ya devuelve el token — no necesita acquireTokenSilent
-    const result = await msalApp.loginPopup({ scopes: MSAL_SCOPE });
-    setMsalUser(result);
-  } catch (e) {
-    console.error('MSAL login error:', e);
-    log('Login fallido: ' + e.message, 'err');
-  }
+  // Redirect (no popup) — GitHub Pages bloquea popups por COOP
+  await msalApp.loginRedirect({ scopes: MSAL_SCOPE });
 }
 
 async function msalLogout() {
   if (!msalApp) return;
-  document.getElementById('cfg_token').value = '';
-  document.getElementById('authUser').textContent = '';
-  document.getElementById('btnLogin').style.display = '';
-  document.getElementById('btnLogout').style.display = 'none';
-  setSt(false, 'Sin conectar');
-  await msalApp.logoutPopup();
+  await msalApp.logoutRedirect();
 }
 
 window.addEventListener('DOMContentLoaded', initMsal);
