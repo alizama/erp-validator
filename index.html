@@ -316,12 +316,14 @@ async function acquireTokenSilent(account) {
   try {
     const result = await msalApp.acquireTokenSilent({ scopes: MSAL_SCOPE, account });
     setMsalUser(result);
-  } catch {
-    await msalLogin();
+  } catch (e) {
+    console.warn('Token silencioso falló:', e.message);
+    // No llamar msalLogin() aquí para evitar loops
   }
 }
 
 function setMsalUser(result) {
+  if (!result?.accessToken) return;
   document.getElementById('cfg_token').value = result.accessToken;
   const name = result.account?.name ?? result.account?.username ?? 'Usuario';
   document.getElementById('authUser').textContent = '✓ ' + name;
@@ -333,12 +335,13 @@ function setMsalUser(result) {
 
 async function msalLogin() {
   if (!msalApp) {
-    alert('MSAL no inicializado. Revisa la consola del navegador (F12) para ver el error.');
+    alert('MSAL no inicializado. Revisa la consola (F12).');
     return;
   }
   try {
+    // loginPopup ya devuelve el token — no necesita acquireTokenSilent
     const result = await msalApp.loginPopup({ scopes: MSAL_SCOPE });
-    await acquireTokenSilent(result.account);
+    setMsalUser(result);
   } catch (e) {
     console.error('MSAL login error:', e);
     log('Login fallido: ' + e.message, 'err');
