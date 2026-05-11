@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <title>ERP Validator Bot</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;700&display=swap');
@@ -112,10 +113,35 @@
             <input id="cfg_host" value="https://validate.alizama.workers.dev?url=https://sgi20240408115317.azurewebsites.net/api" readonly style="opacity:.6;cursor:not-allowed">
             <div class="hint">Configurado: proxy CORS → ERP Azure</div>
           </div>
-          <div class="fg"><label>idcompany</label><input id="cfg_company" type="number" value="25" min="1"></div>
+          <div class="fg">
+            <label>Empresa</label>
+            <select id="cfg_company_sel" onchange="onCompanySel()">
+              <option value="1">1 — Cireba</option>
+              <option value="2">2 — Santa Burguesa</option>
+              <option value="3">3 — Cireba Sur</option>
+              <option value="4">4 — Empresa 4</option>
+              <option value="5">5 — Empresa 5</option>
+              <option value="6">6 — Empresa 6</option>
+              <option value="7">7 — Empresa 7</option>
+              <option value="25" selected>25 — Portal Empleados</option>
+              <option value="custom">Personalizado...</option>
+            </select>
+            <input id="cfg_company" type="number" value="25" min="1"
+                   style="display:none;margin-top:4px" placeholder="Ingresa idcompany"
+                   oninput="document.getElementById('companyBadge').textContent='idcompany: '+currentCompany()">
+          </div>
         </div>
         <div class="fr" style="margin-top:9px">
-          <div class="fg" style="flex:3"><label>Bearer Token</label><input id="cfg_token" type="password" placeholder="eyJhbGci..."></div>
+          <div class="fg" style="flex:3">
+            <label>Autenticación Azure AD</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <button class="btn btn-g btn-sm" id="btnLogin" onclick="msalLogin()">🔑 Iniciar sesión</button>
+              <button class="btn btn-g btn-sm" id="btnLogout" onclick="msalLogout()" style="display:none">↩ Cerrar sesión</button>
+              <span id="authUser" style="font-family:var(--mono);font-size:11px;color:var(--accent)"></span>
+            </div>
+            <input id="cfg_token" type="password" placeholder="Token manual (fallback)" style="margin-top:6px;font-size:10px">
+            <div class="hint">El token se obtiene automáticamente al iniciar sesión</div>
+          </div>
           <div class="fg"><label>Timeout (seg)</label><input id="cfg_timeout" type="number" value="30" min="5" max="120"></div>
         </div>
       </div>
@@ -255,6 +281,82 @@
 </div>
 
 <script>
+// ─── MSAL CONFIG ──────────────────────────────────────────────────────────────
+const MSAL_CONFIG = {
+  auth: {
+    clientId:   '2d3f3398-9443-41fa-8045-11cef62024b7',
+    authority:  'https://login.microsoftonline.com/11a51277-9f3c-4e52-b991-8d15efeda14c',
+    redirectUri: window.location.origin + window.location.pathname,
+  },
+  cache: { cacheLocation: 'sessionStorage' }
+};
+const MSAL_SCOPE = ['api://7fb0030d-3bb7-47ba-aac0-69856b163041/sgi'];
+
+let msalApp = null;
+
+async function initMsal() {
+  if (typeof msal === 'undefined') {
+    console.error('MSAL no cargó — verifica conexión a internet o CDN bloqueado');
+    return;
+  }
+  try {
+    msalApp = new msal.PublicClientApplication(MSAL_CONFIG);
+    await msalApp.initialize();
+    const result = await msalApp.handleRedirectPromise();
+    if (result) { setMsalUser(result); return; }
+    const accounts = msalApp.getAllAccounts();
+    if (accounts.length > 0) await acquireTokenSilent(accounts[0]);
+  } catch (e) {
+    console.error('MSAL init error:', e);
+    msalApp = null;
+  }
+}
+
+async function acquireTokenSilent(account) {
+  try {
+    const result = await msalApp.acquireTokenSilent({ scopes: MSAL_SCOPE, account });
+    setMsalUser(result);
+  } catch {
+    await msalLogin();
+  }
+}
+
+function setMsalUser(result) {
+  document.getElementById('cfg_token').value = result.accessToken;
+  const name = result.account?.name ?? result.account?.username ?? 'Usuario';
+  document.getElementById('authUser').textContent = '✓ ' + name;
+  document.getElementById('btnLogin').style.display = 'none';
+  document.getElementById('btnLogout').style.display = '';
+  setSt(true, 'Autenticado');
+  log('✓ Sesión iniciada: ' + name, 'ok');
+}
+
+async function msalLogin() {
+  if (!msalApp) {
+    alert('MSAL no inicializado. Revisa la consola del navegador (F12) para ver el error.');
+    return;
+  }
+  try {
+    const result = await msalApp.loginPopup({ scopes: MSAL_SCOPE });
+    await acquireTokenSilent(result.account);
+  } catch (e) {
+    console.error('MSAL login error:', e);
+    log('Login fallido: ' + e.message, 'err');
+  }
+}
+
+async function msalLogout() {
+  if (!msalApp) return;
+  document.getElementById('cfg_token').value = '';
+  document.getElementById('authUser').textContent = '';
+  document.getElementById('btnLogin').style.display = '';
+  document.getElementById('btnLogout').style.display = 'none';
+  setSt(false, 'Sin conectar');
+  await msalApp.logoutPopup();
+}
+
+window.addEventListener('DOMContentLoaded', initMsal);
+
 // ═══════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════
@@ -269,7 +371,7 @@ const S = {
 // ═══════════════════════════════════════════════
 const cfg = () => ({
   host:       document.getElementById('cfg_host').value.replace(/\/+$/, ''),
-  company:    document.getElementById('cfg_company').value || '25',
+  company:    currentCompany(),
   token:      document.getElementById('cfg_token').value,
   desde:      document.getElementById('cfg_desde').value,
   hasta:      document.getElementById('cfg_hasta').value,
@@ -894,6 +996,26 @@ function demoContable() {
     { idDocumentoOrigen: 2177 },
     // 2185 sin contable intencionalmente
   ];
+}
+
+function onCompanySel() {
+  const sel = document.getElementById('cfg_company_sel');
+  const inp = document.getElementById('cfg_company');
+  if (sel.value === 'custom') {
+    inp.style.display = '';
+    inp.focus();
+  } else {
+    inp.style.display = 'none';
+    inp.value = sel.value;
+  }
+  document.getElementById('companyBadge').textContent = 'idcompany: ' + currentCompany();
+}
+
+function currentCompany() {
+  const sel = document.getElementById('cfg_company_sel');
+  return sel.value === 'custom'
+    ? document.getElementById('cfg_company').value || '25'
+    : sel.value;
 }
 
 const delay = ms => new Promise(r => setTimeout(r, ms));
