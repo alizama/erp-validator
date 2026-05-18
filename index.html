@@ -533,11 +533,26 @@ async function fetchIva(c) {
 
 async function fetchCxp(c) {
   if (S.demo) return demoCxp();
-  // Todos los estados (PENDIENTE, PARCIAL, PAGADA, VENCIDA, ANULADA)
-  // El endpoint /CuentasPorPagar solo acepta ?estado — sin filtro de fecha
-  const raw = await apiGet('/CuentasPorPagar', {}, c);
-  const all = Array.isArray(raw) ? raw : (raw?.items ?? raw?.data ?? []);
-  log(`  CxP: ${all.length} registros (todos los estados)`, 'ok');
+  // Pendientes (PENDIENTE, PARCIAL, VENCIDA) — paginado con rango de fecha
+  let pendientes = [], page = 1, total = Infinity;
+  while (pendientes.length < total) {
+    const p = { pageNumber: page, pageSize: 100, fechaIngresoDesde: c.desde, fechaIngresoHasta: c.hasta };
+    if (c.grupo) p.grupoPartidaIngresos = c.grupo;
+    const raw = await apiGet('/CuentasPorPagar/pendientes', p, c);
+    const items = raw?.items ?? raw?.data ?? (Array.isArray(raw) ? raw : []);
+    total = raw?.totalCount ?? raw?.total ?? items.length;
+    pendientes = pendientes.concat(items);
+    if (items.length < 100) break;
+    page++;
+  }
+  // Pagadas y anuladas — sin filtro de fecha (endpoint no lo soporta)
+  const rawPagadas = await apiGet('/CuentasPorPagar', { estado: 'PAGADA' }, c).catch(() => ({}));
+  const pagadas = Array.isArray(rawPagadas) ? rawPagadas : [];
+  const rawAnuladas = await apiGet('/CuentasPorPagar', { estado: 'ANULADA' }, c).catch(() => ({}));
+  const anuladas = Array.isArray(rawAnuladas) ? rawAnuladas : [];
+
+  const all = [...pendientes, ...pagadas, ...anuladas];
+  log(`  CxP: ${all.length} registros (pendientes:${pendientes.length} pagadas:${pagadas.length} anuladas:${anuladas.length})`, 'ok');
   return all;
 }
 
