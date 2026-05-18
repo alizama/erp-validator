@@ -534,10 +534,8 @@ async function fetchIva(c) {
 async function fetchCxp(c) {
   if (S.demo) return demoCxp();
   // Todos los estados (PENDIENTE, PARCIAL, PAGADA, VENCIDA, ANULADA)
-  // con rango de fecha para no traer todo el historial
-  const p = { fechaIngresoDesde: c.desde, fechaIngresoHasta: c.hasta };
-  if (c.grupo) p.grupoPartidaIngresos = c.grupo;
-  const raw = await apiGet('/CuentasPorPagar', p, c);
+  // El endpoint /CuentasPorPagar solo acepta ?estado — sin filtro de fecha
+  const raw = await apiGet('/CuentasPorPagar', {}, c);
   const all = Array.isArray(raw) ? raw : (raw?.items ?? raw?.data ?? []);
   log(`  CxP: ${all.length} registros (todos los estados)`, 'ok');
   return all;
