@@ -509,9 +509,14 @@ async function fetchCompras(c) {
   const raw = await apiGet('/ReportesContables/ingresos-compras', p, c);
   const list = Array.isArray(raw) ? raw : (raw?.ingresos ?? raw?.data ?? raw?.items ?? []);
   const hoy = new Date().toISOString().slice(0, 10);
-  const filtrada = list.filter(d => (d.fechaIngreso ?? '').slice(0, 10) < hoy);
+  const EXCLUIDOS = ['rechazada', 'rechazado', 'anulada', 'anulado', 'cancelada', 'cancelado'];
+  const filtrada = list.filter(d => {
+    if ((d.fechaIngreso ?? '').slice(0, 10) >= hoy) return false;
+    const est = (d.estado || d.estadoProcesamiento || '').toLowerCase();
+    return !EXCLUIDOS.some(e => est.includes(e));
+  });
   const omitidos = list.length - filtrada.length;
-  if (omitidos > 0) log(`  ⚠ ${omitidos} doc(s) omitido(s) — fechaIngreso = hoy (${hoy})`, 'warn');
+  if (omitidos > 0) log(`  ⚠ ${omitidos} doc(s) omitido(s) — hoy o rechazado/anulado`, 'warn');
   log(`  Compras: ${filtrada.length} documentos`, 'ok');
   return filtrada;
 }
