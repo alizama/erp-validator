@@ -707,6 +707,7 @@ async function runVal() {
   prog(82, 'Verificando configuración de proveedores...');
   const catalogoRaw = await apiGet('/Proveedor', {}, c).catch(() => []);
   const catalogo = Array.isArray(catalogoRaw) ? catalogoRaw : [];
+  log(`  Catálogo proveedores: ${catalogo.length} registros. Primer item keys: ${catalogo.length > 0 ? Object.keys(catalogo[0]).slice(0,6).join(',') : 'VACÍO'}`, 'info');
   const nombreAId = new Map(catalogo.map(p => [
     (p.nombreproveedor || p.nombreProveedor || '').trim().toUpperCase(),
     Number(p.idproveedor ?? p.idProveedor)
