@@ -706,27 +706,33 @@ async function runVal() {
   // Compras solo tiene nombre — cruzar con catálogo /Proveedor para obtener IDs
   prog(82, 'Verificando configuración de proveedores...');
   // Un solo llamado con detalle completo — verificar cuenta_contable directamente
-  const provFullRaw = await apiGet('/Proveedor/full', {}, c).catch(() => null);
-  log(`  /Proveedor/full — tipo:${typeof provFullRaw} isArray:${Array.isArray(provFullRaw)} keys:${provFullRaw && typeof provFullRaw==='object' && !Array.isArray(provFullRaw) ? Object.keys(provFullRaw).slice(0,5).join(',') : 'N/A'}`, 'info');
-  const provFull = Array.isArray(provFullRaw) ? provFullRaw
-    : (provFullRaw?.data ?? provFullRaw?.items ?? provFullRaw?.proveedores ?? []);
-  // Debug: ver estructura del campo cuenta_contable
-  if (provFull.length > 0) {
-    const muestra = provFull.slice(0, 3).map(p => `${(p.nombreproveedor||'').slice(0,20)}: cuenta_contable=${JSON.stringify(p.cuenta_contable)}`).join(' | ');
-    log(`  DEBUG cuenta_contable: ${muestra}`, 'info');
-  }
-  const tieneCuenta = p => {
-    const cc = p.cuenta_contable;
+  // Verificar cuenta contable: catálogo /Proveedor (IDs) + detalle /Proveedor/{id}
+  const tieneCuenta = cc => {
     if (!cc) return false;
-    if (typeof cc === 'object') return !!(cc.id ?? cc.idCuentaContable ?? cc.codigo ?? cc.code);
+    if (typeof cc === 'object') return !!(cc.id ?? cc.idCuentaContable ?? cc.codigo ?? cc.code ?? cc.idcuentacontable);
     return !!String(cc).trim();
   };
-  const proveedoresSinCuenta = new Set(
-    provFull
-      .filter(p => !tieneCuenta(p))
-      .map(p => (p.nombreproveedor ?? p.nombreProveedor ?? '').trim().toUpperCase())
-      .filter(Boolean)
-  );
+  const proveedoresSinCuenta = new Set();
+  try {
+    const catRaw = await apiGet('/Proveedor', {}, c);
+    const catalogo = Array.isArray(catRaw) ? catRaw : [];
+    const nombreAId = {};
+    catalogo.forEach(p => {
+      const n = (p.nombreproveedor ?? p.nombreProveedor ?? '').trim().toUpperCase();
+      if (n) nombreAId[n] = p.idproveedor ?? p.idProveedor;
+    });
+    const nombresUnicos = [...new Set(compras.map(x => (x.proveedor||'').trim().toUpperCase()).filter(Boolean))];
+    log(`  Verificando ${nombresUnicos.length} proveedores únicos...`, 'info');
+    for (const nombre of nombresUnicos) {
+      const id = nombreAId[nombre];
+      if (!id) continue;
+      const det = await apiGet(`/Proveedor/${id}`, {}, c).catch(() => null);
+      if (det && !tieneCuenta(det.cuenta_contable)) {
+        proveedoresSinCuenta.add(nombre);
+        log(`  ⚠ Sin cuenta contable: ${nombre}`, 'warn');
+      }
+    }
+  } catch(e) { log(`  Error verificando proveedores: ${e.message}`, 'err'); }
   log(`  Proveedores sin cuenta contable: ${proveedoresSinCuenta.size}`, proveedoresSinCuenta.size > 0 ? 'warn' : 'ok');
   const contIdx  = new Map(contList.map(r => [r.idDocumentoOrigen, r]));
   // Ingreso: cruce por numero_documento → id_documento → Kardex
