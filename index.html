@@ -706,8 +706,10 @@ async function runVal() {
   // Compras solo tiene nombre — cruzar con catálogo /Proveedor para obtener IDs
   prog(82, 'Verificando configuración de proveedores...');
   // Un solo llamado con detalle completo — verificar cuenta_contable directamente
-  const provFullRaw = await apiGet('/Proveedor/full', {}, c).catch(() => []);
-  const provFull = Array.isArray(provFullRaw) ? provFullRaw : [];
+  const provFullRaw = await apiGet('/Proveedor/full', {}, c).catch(() => null);
+  log(`  /Proveedor/full — tipo:${typeof provFullRaw} isArray:${Array.isArray(provFullRaw)} keys:${provFullRaw && typeof provFullRaw==='object' && !Array.isArray(provFullRaw) ? Object.keys(provFullRaw).slice(0,5).join(',') : 'N/A'}`, 'info');
+  const provFull = Array.isArray(provFullRaw) ? provFullRaw
+    : (provFullRaw?.data ?? provFullRaw?.items ?? provFullRaw?.proveedores ?? []);
   // Debug: ver estructura del campo cuenta_contable
   if (provFull.length > 0) {
     const muestra = provFull.slice(0, 3).map(p => `${(p.nombreproveedor||'').slice(0,20)}: cuenta_contable=${JSON.stringify(p.cuenta_contable)}`).join(' | ');
