@@ -727,7 +727,7 @@ async function runVal() {
       const id = nombreAId[nombre];
       if (!id) continue;
       const det = await apiGet(`/Proveedor/${id}`, {}, c).catch(() => null);
-      if (det && !tieneCuenta(det.cuenta_contable)) {
+      if (det && !det.cuenta) {
         proveedoresSinCuenta.add(nombre);
         log(`  ⚠ Sin cuenta contable: ${nombre}`, 'warn');
       }
