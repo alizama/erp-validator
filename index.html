@@ -690,7 +690,8 @@ async function runVal() {
   const reglas = c.reglas;
   const resultado = compras.map(comp => {
     const tipo = comp.tipoProducto ?? 'MATERIA_PRIMA';
-    const regla = reglas[tipo] ?? reglas['MATERIA_PRIMA'];
+    // RETACEO no genera movimientos de Kardex — usar reglas de PRODUCTOS_SERVICIOS
+    const regla = reglas[tipo] ?? (tipo.includes('RETACEO') ? reglas['PRODUCTOS_SERVICIOS'] : reglas['MATERIA_PRIMA']);
 
     // 1. Matemática
     const grabado   = +(comp.totalGrabado ?? comp.monto ?? 0);
