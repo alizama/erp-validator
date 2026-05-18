@@ -672,7 +672,8 @@ async function runVal() {
   // IVA índices — forzar número para idDocumentoOrigen
   const ivaIdx      = new Map(ivaList.map(r => [+(r.idDocumentoOrigen ?? r.IdDocumentoOrigen ?? 0), r]));
   const ivaByNdoc   = new Map(ivaList.map(r => [(r.numeroDocumento ?? r.NumeroDocumento ?? '').trim(), r]));
-  const cxpIdx   = new Map(cxpList.map(r => [r.idDocumentoOrigen, r]));
+  const cxpIdx   = new Map(cxpList.map(r => [+(r.idDocumentoOrigen ?? 0), r]));
+  if(cxpList.length > 0) log(`  CxP debug: primer idDocOrigen=${cxpList[0].idDocumentoOrigen} tipo=${typeof cxpList[0].idDocumentoOrigen} total=${cxpList.length}`, 'info');
   const contIdx  = new Map(contList.map(r => [r.idDocumentoOrigen, r]));
   // Ingreso: cruce por numero_documento → id_documento → Kardex
   const ingresoByNdoc = new Map(ingresos.map(r => [r.numero_documento?.trim(), r]));
@@ -698,7 +699,7 @@ async function runVal() {
     const okIva   = !regla.iva ? null : !!ivaReg;
 
     // 3. CxP
-    const cxpReg  = cxpIdx.get(comp.idDocumento);
+    const cxpReg  = cxpIdx.get(+(comp.idDocumento ?? comp.idDoc ?? 0));
     const okCxp   = !regla.cxp ? null : !!cxpReg;
 
     // 4. Kardex — cruce via ivaReg.ingresoOrigen.id_documento (más confiable)
