@@ -705,28 +705,15 @@ async function runVal() {
   // Verificar configuración de proveedores (cuenta contable)
   // Compras solo tiene nombre — cruzar con catálogo /Proveedor para obtener IDs
   prog(82, 'Verificando configuración de proveedores...');
-  const catalogoRaw = await apiGet('/Proveedor', {}, c).catch(() => []);
-  const catalogo = Array.isArray(catalogoRaw) ? catalogoRaw : [];
-  log(`  Catálogo proveedores: ${catalogo.length} registros. Primer item keys: ${catalogo.length > 0 ? Object.keys(catalogo[0]).slice(0,6).join(',') : 'VACÍO'}`, 'info');
-  const nombreAId = new Map(catalogo.map(p => [
-    (p.nombreproveedor || p.nombreProveedor || '').trim().toUpperCase(),
-    Number(p.idproveedor ?? p.idProveedor)
-  ]));
-  const nombresUnicos = [...new Set(compras.map(c2 => (c2.proveedor||'').trim().toUpperCase()).filter(Boolean))];
-  const idsProveedores2 = nombresUnicos.map(n => nombreAId.get(n)).filter(Boolean);
-
-  const proveedoresSinCuenta = new Set(); // Set de NOMBRES en mayúsculas
-  for (let i = 0; i < idsProveedores2.length; i += 10) {
-    const lote = idsProveedores2.slice(i, i + 10);
-    const res = await Promise.allSettled(lote.map(id => apiGet(`/Proveedor/${id}`, {}, c)));
-    res.forEach((r, idx) => {
-      if (r.status === 'fulfilled' && !r.value?.cuenta_contable) {
-        const idBuscado = lote[idx];
-        const entrada = [...nombreAId.entries()].find(([, id]) => id === idBuscado);
-        if (entrada) proveedoresSinCuenta.add(entrada[0]);
-      }
-    });
-  }
+  // Un solo llamado con detalle completo — verificar cuenta_contable directamente
+  const provFullRaw = await apiGet('/Proveedor/full', {}, c).catch(() => []);
+  const provFull = Array.isArray(provFullRaw) ? provFullRaw : [];
+  const proveedoresSinCuenta = new Set(
+    provFull
+      .filter(p => !p.cuenta_contable)
+      .map(p => (p.nombreproveedor ?? p.nombreProveedor ?? '').trim().toUpperCase())
+      .filter(Boolean)
+  );
   log(`  Proveedores sin cuenta contable: ${proveedoresSinCuenta.size}`, proveedoresSinCuenta.size > 0 ? 'warn' : 'ok');
   const contIdx  = new Map(contList.map(r => [r.idDocumentoOrigen, r]));
   // Ingreso: cruce por numero_documento → id_documento → Kardex
