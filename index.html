@@ -708,9 +708,20 @@ async function runVal() {
   // Un solo llamado con detalle completo — verificar cuenta_contable directamente
   const provFullRaw = await apiGet('/Proveedor/full', {}, c).catch(() => []);
   const provFull = Array.isArray(provFullRaw) ? provFullRaw : [];
+  // Debug: ver estructura del campo cuenta_contable
+  if (provFull.length > 0) {
+    const muestra = provFull.slice(0, 3).map(p => `${(p.nombreproveedor||'').slice(0,20)}: cuenta_contable=${JSON.stringify(p.cuenta_contable)}`).join(' | ');
+    log(`  DEBUG cuenta_contable: ${muestra}`, 'info');
+  }
+  const tieneCuenta = p => {
+    const cc = p.cuenta_contable;
+    if (!cc) return false;
+    if (typeof cc === 'object') return !!(cc.id ?? cc.idCuentaContable ?? cc.codigo ?? cc.code);
+    return !!String(cc).trim();
+  };
   const proveedoresSinCuenta = new Set(
     provFull
-      .filter(p => !p.cuenta_contable)
+      .filter(p => !tieneCuenta(p))
       .map(p => (p.nombreproveedor ?? p.nombreProveedor ?? '').trim().toUpperCase())
       .filter(Boolean)
   );
