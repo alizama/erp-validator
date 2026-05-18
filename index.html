@@ -185,6 +185,22 @@
               <td><input type="checkbox" id="r_af_kx"></td>
               <td><input type="checkbox" id="r_af_cont" checked></td>
             </tr>
+            <tr>
+              <td><span class="tag" style="background:rgba(139,92,246,.15);color:#a78bfa">RETACEO MATERIA_PRIMA</span></td>
+              <td><input type="checkbox" id="r_rmp_mat" checked disabled> ✓</td>
+              <td><input type="checkbox" id="r_rmp_iva" checked></td>
+              <td><input type="checkbox" id="r_rmp_cxp" checked></td>
+              <td><input type="checkbox" id="r_rmp_kx"></td>
+              <td><input type="checkbox" id="r_rmp_cont" checked></td>
+            </tr>
+            <tr>
+              <td><span class="tag" style="background:rgba(139,92,246,.15);color:#a78bfa">RETACEO PRODUCTO_SERVICIO</span></td>
+              <td><input type="checkbox" id="r_rps_mat" checked disabled> ✓</td>
+              <td><input type="checkbox" id="r_rps_iva" checked></td>
+              <td><input type="checkbox" id="r_rps_cxp" checked></td>
+              <td><input type="checkbox" id="r_rps_kx"></td>
+              <td><input type="checkbox" id="r_rps_cont" checked></td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -375,7 +391,9 @@ const cfg = () => ({
   reglas: {
     MATERIA_PRIMA:       { iva: document.getElementById('r_mp_iva').checked, cxp: document.getElementById('r_mp_cxp').checked, kx: document.getElementById('r_mp_kx').checked, cont: document.getElementById('r_mp_cont').checked },
     PRODUCTOS_SERVICIOS: { iva: document.getElementById('r_ps_iva').checked, cxp: document.getElementById('r_ps_cxp').checked, kx: document.getElementById('r_ps_kx').checked,  cont: document.getElementById('r_ps_cont').checked },
-    ACTIVOS_FIJOS:       { iva: document.getElementById('r_af_iva').checked, cxp: document.getElementById('r_af_cxp').checked, kx: document.getElementById('r_af_kx').checked,  cont: document.getElementById('r_af_cont').checked }
+    ACTIVOS_FIJOS:           { iva: document.getElementById('r_af_iva').checked,  cxp: document.getElementById('r_af_cxp').checked,  kx: document.getElementById('r_af_kx').checked,  cont: document.getElementById('r_af_cont').checked },
+    'RETACEO MATERIA_PRIMA':    { iva: document.getElementById('r_rmp_iva').checked, cxp: document.getElementById('r_rmp_cxp').checked, kx: document.getElementById('r_rmp_kx').checked, cont: document.getElementById('r_rmp_cont').checked },
+    'RETACEO PRODUCTO_SERVICIO':{ iva: document.getElementById('r_rps_iva').checked, cxp: document.getElementById('r_rps_cxp').checked, kx: document.getElementById('r_rps_kx').checked, cont: document.getElementById('r_rps_cont').checked }
   }
 });
 
