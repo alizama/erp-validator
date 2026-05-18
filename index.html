@@ -775,9 +775,11 @@ async function runVal() {
     const contReg = contIdx.get(comp.idDocumento);
     const okCont  = !regla.cont ? null : !!contReg;
 
-    // 6. Config proveedor — cuenta contable (buscar por nombre)
+    // 6. Config proveedor — solo marca error si falla CxP o Contable (causa explicativa)
     const nombreProv = (comp.proveedor || '').trim().toUpperCase();
-    const okCfg = nombreProv ? (proveedoresSinCuenta.has(nombreProv) ? false : true) : null;
+    const sinCuenta = nombreProv && proveedoresSinCuenta.has(nombreProv);
+    const fallaCxpContable = okCxp === false || okCont === false;
+    const okCfg = (sinCuenta && fallaCxpContable) ? false : null;
 
     const errores = [];
     if (!okMat) errores.push(`Diferencia matemática: calculado $${calculado} vs total $${total} (diff $${diffMat})`);
