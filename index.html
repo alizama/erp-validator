@@ -533,19 +533,13 @@ async function fetchIva(c) {
 
 async function fetchCxp(c) {
   if (S.demo) return demoCxp();
-  // Paginar hasta traer todos
-  let all = [], page = 1, total = Infinity;
-  while (all.length < total) {
-    const p = { pageNumber: page, pageSize: 100, fechaIngresoDesde: c.desde, fechaIngresoHasta: c.hasta };
-    if (c.grupo) p.grupoPartidaIngresos = c.grupo;
-    const raw = await apiGet('/CuentasPorPagar/pendientes', p, c);
-    const items = raw?.items ?? raw?.data ?? (Array.isArray(raw) ? raw : []);
-    total = raw?.totalCount ?? raw?.total ?? items.length;
-    all = all.concat(items);
-    if (items.length < 100) break;
-    page++;
-  }
-  log(`  CxP: ${all.length} registros`, 'ok');
+  // Todos los estados (PENDIENTE, PARCIAL, PAGADA, VENCIDA, ANULADA)
+  // con rango de fecha para no traer todo el historial
+  const p = { fechaIngresoDesde: c.desde, fechaIngresoHasta: c.hasta };
+  if (c.grupo) p.grupoPartidaIngresos = c.grupo;
+  const raw = await apiGet('/CuentasPorPagar', p, c);
+  const all = Array.isArray(raw) ? raw : (raw?.items ?? raw?.data ?? []);
+  log(`  CxP: ${all.length} registros (todos los estados)`, 'ok');
   return all;
 }
 
