@@ -693,8 +693,9 @@ async function runVal() {
   stEl.textContent = 'Conciliando...';
   log('── Conciliación cruzada ──', 'info');
 
-  // DEBUG IVA
+  // DEBUG IVA y COMPRAS
   if(ivaList.length > 0) log(`IVA debug: keys=${Object.keys(ivaList[0]).slice(0,5).join(',')} idOrigen=${ivaList[0].idDocumentoOrigen ?? ivaList[0].IdDocumentoOrigen}`, 'info');
+  if(compras.length > 0) log(`Compras debug: keys=${Object.keys(compras[0]).filter(k=>k.toLowerCase().includes('prov')||k.toLowerCase().includes('id')).join(',')}`, 'info');
   // Índices para búsqueda O(1)
   // IVA índices — forzar número para idDocumentoOrigen
   const ivaIdx      = new Map(ivaList.map(r => [+(r.idDocumentoOrigen ?? r.IdDocumentoOrigen ?? 0), r]));
