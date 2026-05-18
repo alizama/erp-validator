@@ -261,9 +261,10 @@
             <th title="CxP">CxP</th>
             <th title="Kardex">KDX</th>
             <th title="Contable">CTB</th>
+            <th title="Config Proveedor">CFG</th>
             <th>Estado</th>
           </tr></thead>
-          <tbody id="tb-compras"><tr><td colspan="16"><div class="empty">Sin datos</div></td></tr></tbody>
+          <tbody id="tb-compras"><tr><td colspan="17"><div class="empty">Sin datos</div></td></tr></tbody>
         </table>
       </div>
 
@@ -699,7 +700,21 @@ async function runVal() {
   const ivaIdx      = new Map(ivaList.map(r => [+(r.idDocumentoOrigen ?? r.IdDocumentoOrigen ?? 0), r]));
   const ivaByNdoc   = new Map(ivaList.map(r => [(r.numeroDocumento ?? r.NumeroDocumento ?? '').trim(), r]));
   const cxpIdx   = new Map(cxpList.map(r => [+(r.idDocumentoOrigen ?? 0), r]));
-  if(cxpList.length > 0) log(`  CxP debug: primer idDocOrigen=${cxpList[0].idDocumentoOrigen} tipo=${typeof cxpList[0].idDocumentoOrigen} total=${cxpList.length}`, 'info');
+
+  // Verificar configuración de proveedores (cuenta contable)
+  prog(82, 'Verificando configuración de proveedores...');
+  const idsProveedores = [...new Set(compras.map(c => c.idProveedor).filter(Boolean))];
+  const proveedoresSinCuenta = new Set();
+  for (let i = 0; i < idsProveedores.length; i += 10) {
+    const lote = idsProveedores.slice(i, i + 10);
+    const res = await Promise.allSettled(lote.map(id => apiGet(`/Proveedor/${id}`, {}, c)));
+    res.forEach((r, idx) => {
+      if (r.status === 'fulfilled' && !r.value?.cuenta_contable) {
+        proveedoresSinCuenta.add(+lote[idx]);
+      }
+    });
+  }
+  log(`  Proveedores sin cuenta contable: ${proveedoresSinCuenta.size}`, proveedoresSinCuenta.size > 0 ? 'warn' : 'ok');
   const contIdx  = new Map(contList.map(r => [r.idDocumentoOrigen, r]));
   // Ingreso: cruce por numero_documento → id_documento → Kardex
   const ingresoByNdoc = new Map(ingresos.map(r => [r.numero_documento?.trim(), r]));
@@ -741,22 +756,27 @@ async function runVal() {
     const contReg = contIdx.get(comp.idDocumento);
     const okCont  = !regla.cont ? null : !!contReg;
 
+    // 6. Config proveedor — cuenta contable
+    const idProv = comp.idProveedor ?? null;
+    const okCfg  = idProv ? (proveedoresSinCuenta.has(+idProv) ? false : true) : null;
+
     const errores = [];
     if (!okMat) errores.push(`Diferencia matemática: calculado $${calculado} vs total $${total} (diff $${diffMat})`);
     if (okIva === false) errores.push('No encontrado en Libro de IVA F07_ANEXO3');
-    if (okCxp === false) errores.push('No encontrado en CxP pendientes');
+    if (okCxp === false) errores.push('Sin CxP registrada');
     if (okKx  === false) errores.push(
       kxReg ? `Kardex existe pero estado es "${kxReg.estado}" (esperado RECIBIDO)` :
       `Sin movimiento en Kardex (ingreso #${ingresoId})`
     );
     if (okCont === false) errores.push('Sin partida contable registrada');
+    if (okCfg  === false) errores.push('[Admin ERP] Proveedor sin cuenta contable configurada');
 
     return {
       idDoc: comp.idDocumento, ndoc: comp.numeroDocumento,
       proveedor: comp.proveedor, centroCosto: comp.centroCostosDestinoNombre,
       tipo, fechaDoc: (comp.fechaIngreso ?? comp.fechaDocumento ?? '').slice(0, 10),
       grabado, iva, retencion, total,
-      okMat, okIva, okCxp, okKx, okCont,
+      okMat, okIva, okCxp, okKx, okCont, okCfg,
       errores,
       ivaReg, cxpReg, kxReg, contReg,
       get _err() { return this.errores.length > 0; }
@@ -862,6 +882,7 @@ function renderTabla(data) {
       <td>${chkIcon(r.okCxp)}</td>
       <td>${chkIcon(r.okKx)}</td>
       <td>${chkIcon(r.okCont)}</td>
+      <td>${chkIcon(r.okCfg)}</td>
       <td><span class="tag ${r._err ? 'terr' : 'tok'}">${r._err ? '✗ Error' : '✓ OK'}</span></td>
     </tr>`).join('');
 }
