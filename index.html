@@ -703,15 +703,26 @@ async function runVal() {
   const cxpIdx   = new Map(cxpList.map(r => [+(r.idDocumentoOrigen ?? 0), r]));
 
   // Verificar configuración de proveedores (cuenta contable)
+  // Compras solo tiene nombre — cruzar con catálogo /Proveedor para obtener IDs
   prog(82, 'Verificando configuración de proveedores...');
-  const idsProveedores = [...new Set(compras.map(c => c.idProveedor).filter(Boolean))];
-  const proveedoresSinCuenta = new Set();
-  for (let i = 0; i < idsProveedores.length; i += 10) {
-    const lote = idsProveedores.slice(i, i + 10);
+  const catalogoRaw = await apiGet('/Proveedor', {}, c).catch(() => []);
+  const catalogo = Array.isArray(catalogoRaw) ? catalogoRaw : [];
+  const nombreAId = new Map(catalogo.map(p => [
+    (p.nombreproveedor || p.nombreProveedor || '').trim().toUpperCase(),
+    Number(p.idproveedor ?? p.idProveedor)
+  ]));
+  const nombresUnicos = [...new Set(compras.map(c2 => (c2.proveedor||'').trim().toUpperCase()).filter(Boolean))];
+  const idsProveedores2 = nombresUnicos.map(n => nombreAId.get(n)).filter(Boolean);
+
+  const proveedoresSinCuenta = new Set(); // Set de NOMBRES en mayúsculas
+  for (let i = 0; i < idsProveedores2.length; i += 10) {
+    const lote = idsProveedores2.slice(i, i + 10);
     const res = await Promise.allSettled(lote.map(id => apiGet(`/Proveedor/${id}`, {}, c)));
     res.forEach((r, idx) => {
       if (r.status === 'fulfilled' && !r.value?.cuenta_contable) {
-        proveedoresSinCuenta.add(+lote[idx]);
+        const idBuscado = lote[idx];
+        const entrada = [...nombreAId.entries()].find(([, id]) => id === idBuscado);
+        if (entrada) proveedoresSinCuenta.add(entrada[0]);
       }
     });
   }
@@ -757,9 +768,9 @@ async function runVal() {
     const contReg = contIdx.get(comp.idDocumento);
     const okCont  = !regla.cont ? null : !!contReg;
 
-    // 6. Config proveedor — cuenta contable
-    const idProv = comp.idProveedor ?? null;
-    const okCfg  = idProv ? (proveedoresSinCuenta.has(+idProv) ? false : true) : null;
+    // 6. Config proveedor — cuenta contable (buscar por nombre)
+    const nombreProv = (comp.proveedor || '').trim().toUpperCase();
+    const okCfg = nombreProv ? (proveedoresSinCuenta.has(nombreProv) ? false : true) : null;
 
     const errores = [];
     if (!okMat) errores.push(`Diferencia matemática: calculado $${calculado} vs total $${total} (diff $${diffMat})`);
