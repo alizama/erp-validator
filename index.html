@@ -130,6 +130,14 @@
                    style="display:none;margin-top:4px" placeholder="Ingresa idcompany"
                    oninput="document.getElementById('companyBadge').textContent='idcompany: '+currentCompany()">
           </div>
+          <div class="fg" style="min-width:140px;justify-content:flex-end">
+            <label>Régimen fiscal</label>
+            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;margin-top:6px">
+              <input type="checkbox" id="cfg_gran_contrib" onchange="onCompanySel()" style="width:14px;height:14px;accent-color:var(--accent)">
+              <span style="font-size:12px">Gran Contribuyente</span>
+            </label>
+            <div class="hint">Sin marcar: aplica percepción 1%</div>
+          </div>
         </div>
         <div class="fr" style="margin-top:9px">
           <div class="fg" style="flex:3">
@@ -364,7 +372,7 @@ async function msalLogout() {
   await msalApp.logoutRedirect();
 }
 
-window.addEventListener('DOMContentLoaded', initMsal);
+window.addEventListener('DOMContentLoaded', () => { initMsal(); onCompanySel(); });
 
 // ═══════════════════════════════════════════════
 // STATE
@@ -751,11 +759,13 @@ async function runVal() {
     const regla = reglas[tipo] ?? (tipo.includes('RETACEO') ? reglas['PRODUCTOS_SERVICIOS'] : reglas['MATERIA_PRIMA']);
 
     // 1. Matemática
+    const granContrib = document.getElementById('cfg_gran_contrib')?.checked ?? true;
     const grabado    = +(comp.totalGrabado ?? comp.monto ?? 0);
     const iva        = +(comp.iva ?? 0);
-    const percepcion = +(comp.percepcion ?? comp.totales_?.percepcion ?? 0);
     const retencion  = +(comp.retencion ?? 0);
     const total      = +(comp.total ?? 0);
+    // Para no grandes contribuyentes el ERP incluye percepción 1% en total pero no como campo separado
+    const percepcion = granContrib ? 0 : +(grabado * 0.01).toFixed(2);
     const calculado  = +(grabado + iva + percepcion - retencion).toFixed(2);
     const diffMat   = +(calculado - total).toFixed(2);
     const okMat     = Math.abs(diffMat) <= 0.02;
@@ -1062,6 +1072,9 @@ function demoContable() {
   ];
 }
 
+// Empresas clasificadas como Gran Contribuyente (no aplica percepción 1%)
+const GRAN_CONTRIBUYENTES = new Set(['25']); // Cireba
+
 function onCompanySel() {
   const sel = document.getElementById('cfg_company_sel');
   const inp = document.getElementById('cfg_company');
@@ -1072,6 +1085,9 @@ function onCompanySel() {
     inp.style.display = 'none';
     inp.value = sel.value;
   }
+  // Auto-marcar Gran Contribuyente según empresa seleccionada
+  const chk = document.getElementById('cfg_gran_contrib');
+  if (chk) chk.checked = GRAN_CONTRIBUYENTES.has(sel.value);
   document.getElementById('companyBadge').textContent = 'idcompany: ' + currentCompany();
 }
 
