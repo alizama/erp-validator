@@ -753,7 +753,7 @@ async function runVal() {
     // 1. Matemática
     const grabado    = +(comp.totalGrabado ?? comp.monto ?? 0);
     const iva        = +(comp.iva ?? 0);
-    const percepcion = +(comp.percepcion ?? 0);
+    const percepcion = +(comp.percepcion ?? comp.totales_?.percepcion ?? 0);
     const retencion  = +(comp.retencion ?? 0);
     const total      = +(comp.total ?? 0);
     const calculado  = +(grabado + iva + percepcion - retencion).toFixed(2);
