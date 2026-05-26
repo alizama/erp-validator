@@ -764,11 +764,11 @@ async function runVal() {
     const iva        = +(comp.iva ?? 0);
     const retencion  = +(comp.retencion ?? 0);
     const total      = +(comp.total ?? 0);
-    // Para no grandes contribuyentes el ERP incluye percepción 1% en total pero no como campo separado
-    const percepcion = granContrib ? 0 : +(grabado * 0.01).toFixed(2);
-    const calculado  = +(grabado + iva + percepcion - retencion).toFixed(2);
+    const calculado  = +(grabado + iva - retencion).toFixed(2);
     const diffMat   = +(calculado - total).toFixed(2);
-    const okMat     = Math.abs(diffMat) <= 0.02;
+    // Para no grandes contribuyentes: aceptar si el diff es ≈1% del grabado (proveedor agente de percepción)
+    const esPercepcion = !granContrib && diffMat < 0 && Math.abs(Math.abs(diffMat) - +(grabado * 0.01).toFixed(2)) <= 0.05;
+    const okMat     = Math.abs(diffMat) <= 0.02 || esPercepcion;
 
     // 2. IVA
     // IVA — cruce por idDocumentoOrigen o por numeroDocumento
