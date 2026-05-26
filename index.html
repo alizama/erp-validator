@@ -751,11 +751,12 @@ async function runVal() {
     const regla = reglas[tipo] ?? (tipo.includes('RETACEO') ? reglas['PRODUCTOS_SERVICIOS'] : reglas['MATERIA_PRIMA']);
 
     // 1. Matemática
-    const grabado   = +(comp.totalGrabado ?? comp.monto ?? 0);
-    const iva       = +(comp.iva ?? 0);
-    const retencion = +(comp.retencion ?? 0);
-    const total     = +(comp.total ?? 0);
-    const calculado = +(grabado + iva - retencion).toFixed(2);
+    const grabado    = +(comp.totalGrabado ?? comp.monto ?? 0);
+    const iva        = +(comp.iva ?? 0);
+    const percepcion = +(comp.percepcion ?? 0);
+    const retencion  = +(comp.retencion ?? 0);
+    const total      = +(comp.total ?? 0);
+    const calculado  = +(grabado + iva + percepcion - retencion).toFixed(2);
     const diffMat   = +(calculado - total).toFixed(2);
     const okMat     = Math.abs(diffMat) <= 0.02;
 
