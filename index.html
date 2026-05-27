@@ -130,14 +130,6 @@
                    style="display:none;margin-top:4px" placeholder="Ingresa idcompany"
                    oninput="document.getElementById('companyBadge').textContent='idcompany: '+currentCompany()">
           </div>
-          <div class="fg" style="min-width:140px;justify-content:flex-end">
-            <label>Régimen fiscal</label>
-            <label style="display:flex;align-items:center;gap:7px;cursor:pointer;margin-top:6px">
-              <input type="checkbox" id="cfg_gran_contrib" onchange="onCompanySel()" style="width:14px;height:14px;accent-color:var(--accent)">
-              <span style="font-size:12px">Gran Contribuyente</span>
-            </label>
-            <div class="hint">Sin marcar: aplica percepción 1%</div>
-          </div>
         </div>
         <div class="fr" style="margin-top:9px">
           <div class="fg" style="flex:3">
@@ -151,6 +143,13 @@
             <div class="hint">El token se obtiene automáticamente al iniciar sesión</div>
           </div>
           <div class="fg"><label>Timeout (seg)</label><input id="cfg_timeout" type="number" value="30" min="5" max="120"></div>
+          <div class="fg" style="flex:0 0 auto;min-width:150px">
+            <label>Gran Contribuyente</label>
+            <div style="display:flex;align-items:center;gap:7px;margin-top:8px">
+              <input type="checkbox" id="cfg_gran_contrib" checked style="width:auto">
+              <span style="font-size:10px;color:var(--muted);font-family:var(--mono)">No aplica percepción 1%</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -371,6 +370,8 @@ async function msalLogout() {
   if (!msalApp) return;
   await msalApp.logoutRedirect();
 }
+
+const GRAN_CONTRIBUYENTES = new Set(['25']); // Cireba — no aplica percepción 1%
 
 window.addEventListener('DOMContentLoaded', () => { initMsal(); onCompanySel(); });
 
@@ -750,7 +751,15 @@ async function runVal() {
   const contIdx  = new Map(contList.map(r => [r.idDocumentoOrigen, r]));
   // Ingreso: cruce por numero_documento → id_documento → Kardex
   const ingresoByNdoc = new Map(ingresos.map(r => [r.numero_documento?.trim(), r]));
-  const kxByIngresoId = new Map(kardexList.map(r => [r.documentoIngresoId, r]));
+  // Kardex: indexar con Number para evitar mismatch de tipos — solo guardar RECIBIDO/APROBADO como válidos
+  const kxByIngresoId = new Map();
+  const kxValidIds = new Set();
+  for (const r of kardexList) {
+    const id = Number(r.documentoIngresoId);
+    if (!id) continue;
+    if (!kxByIngresoId.has(id)) kxByIngresoId.set(id, r); // primer registro para mensaje de error
+    if (r.estado === 'RECIBIDO' || r.estado === 'APROBADO') kxValidIds.add(id);
+  }
 
   const reglas = c.reglas;
   const resultado = compras.map(comp => {
@@ -759,15 +768,14 @@ async function runVal() {
     const regla = reglas[tipo] ?? (tipo.includes('RETACEO') ? reglas['PRODUCTOS_SERVICIOS'] : reglas['MATERIA_PRIMA']);
 
     // 1. Matemática
-    const granContrib = document.getElementById('cfg_gran_contrib')?.checked ?? true;
     const grabado    = +(comp.totalGrabado ?? comp.monto ?? 0);
     const iva        = +(comp.iva ?? 0);
     const retencion  = +(comp.retencion ?? 0);
     const total      = +(comp.total ?? 0);
     const calculado  = +(grabado + iva - retencion).toFixed(2);
-    const diffMat   = +(calculado - total).toFixed(2);
-    // Para no grandes contribuyentes: aceptar si el diff es ≈1% del grabado (proveedor agente de percepción)
-    const esPercepcion = !granContrib && diffMat < 0 && Math.abs(Math.abs(diffMat) - +(grabado * 0.01).toFixed(2)) <= 0.05;
+    const diffMat   = +(total - calculado).toFixed(2); // positivo = total > calculado (percepción incluida)
+    const granContrib = document.getElementById('cfg_gran_contrib')?.checked ?? true;
+    const esPercepcion = !granContrib && diffMat > 0 && Math.abs(diffMat - +(grabado * 0.01).toFixed(2)) <= 0.05;
     const okMat     = Math.abs(diffMat) <= 0.02 || esPercepcion;
 
     // 2. IVA
@@ -780,12 +788,14 @@ async function runVal() {
     const okCxp   = !regla.cxp ? null : !!cxpReg;
 
     // 4. Kardex — cruce via ivaReg.ingresoOrigen.id_documento (más confiable)
-    //    Fallback: ingresoByNdoc → id_documento
-    const ingresoId  = ivaReg?.ingresoOrigen?.id_documento
-                    ?? ingresoByNdoc.get((comp.ndoc ?? '').trim())?.id_documento
-                    ?? comp.idDoc;
+    //    Fallback 1: ingresoByNdoc por numero de documento
+    //    Fallback 2: idDocumento del compra directamente
+    const ingresoIdRaw = ivaReg?.ingresoOrigen?.id_documento
+                      ?? ingresoByNdoc.get((comp.numeroDocumento ?? '').trim())?.id_documento
+                      ?? comp.idDocumento;
+    const ingresoId  = Number(ingresoIdRaw) || 0;
     const kxReg      = kxByIngresoId.get(ingresoId);
-    const okKx       = !regla.kx ? null : (!!kxReg && ['RECIBIDO','APROBADO'].includes(kxReg.estado));
+    const okKx       = !regla.kx ? null : kxValidIds.has(ingresoId);
 
     // 5. Contable
     const contReg = contIdx.get(comp.idDocumento);
@@ -802,8 +812,8 @@ async function runVal() {
     if (okIva === false) errores.push('No encontrado en Libro de IVA F07_ANEXO3');
     if (okCxp === false) errores.push('Sin CxP registrada');
     if (okKx  === false) errores.push(
-      kxReg ? `Kardex existe pero estado es "${kxReg.estado}" (esperado RECIBIDO)` :
-      `Sin movimiento en Kardex (ingreso #${ingresoId})`
+      kxReg ? `Kardex existe pero estado es "${kxReg.estado}" (esperado RECIBIDO/APROBADO)` :
+      `Sin movimiento en Kardex (ingreso #${ingresoId || 'desconocido'})`
     );
     if (okCont === false) errores.push('Sin partida contable registrada');
     if (okCfg  === false) errores.push('[Admin ERP] Proveedor sin cuenta contable configurada');
@@ -1072,9 +1082,6 @@ function demoContable() {
   ];
 }
 
-// Empresas clasificadas como Gran Contribuyente (no aplica percepción 1%)
-const GRAN_CONTRIBUYENTES = new Set(['25']); // Cireba
-
 function onCompanySel() {
   const sel = document.getElementById('cfg_company_sel');
   const inp = document.getElementById('cfg_company');
@@ -1085,10 +1092,9 @@ function onCompanySel() {
     inp.style.display = 'none';
     inp.value = sel.value;
   }
-  // Auto-marcar Gran Contribuyente según empresa seleccionada
-  const chk = document.getElementById('cfg_gran_contrib');
-  if (chk) chk.checked = GRAN_CONTRIBUYENTES.has(sel.value);
   document.getElementById('companyBadge').textContent = 'idcompany: ' + currentCompany();
+  const gc = document.getElementById('cfg_gran_contrib');
+  if (gc) gc.checked = GRAN_CONTRIBUYENTES.has(sel.value === 'custom' ? inp.value : sel.value);
 }
 
 function currentCompany() {
