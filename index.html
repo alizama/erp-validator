@@ -96,6 +96,7 @@
     <div class="ni active" onclick="sp('config')"><span class="ni-icon">⚙️</span> Configuración</div>
     <div class="slabel">Validación</div>
     <div class="ni" onclick="sp('compras')" id="nav-compras"><span class="ni-icon">🧾</span> Compras<span class="nbadge" id="b-compras" style="display:none"></span></div>
+    <div class="ni" onclick="sp('tesoreria')" id="nav-tesoreria"><span class="ni-icon">💰</span> Tesorería<span class="nbadge" id="b-tesoreria" style="display:none"></span></div>
     <div class="slabel">Sistema</div>
     <div class="ni" onclick="sp('log')"><span class="ni-icon">🖥️</span> Log</div>
   </nav>
@@ -222,17 +223,14 @@
       </div>
 
       <div class="notice">
-        ℹ️ Endpoints: <b>Compras</b> /ReportesContables/ingresos-compras &nbsp;|&nbsp;
-        <b>IVA</b> /AnexoIva/por-tipo &nbsp;|&nbsp;
-        <b>CxP</b> /CuentasPorPagar/pendientes &nbsp;|&nbsp;
-        <b>Kardex</b> /BodegaDistribucion/kardex &nbsp;|&nbsp;
-        <b>Contable</b> /PartidaContable/auxiliar-cuentas &nbsp;|&nbsp;
-        <b>Ubicaciones</b> /Ubicacion
+        ℹ️ <b>Compras:</b> /ReportesContables/ingresos-compras &nbsp;|&nbsp; <b>IVA</b> /AnexoIva/por-tipo &nbsp;|&nbsp; <b>CxP</b> /CuentasPorPagar/pendientes &nbsp;|&nbsp; <b>Kardex</b> /BodegaDistribucion/kardex &nbsp;|&nbsp; <b>Contable</b> /PartidaContable/auxiliar-cuentas &nbsp;|&nbsp; <b>Ubicaciones</b> /Ubicacion<br>
+        💰 <b>Pagos</b> /CuentasPorPagar/pagos &nbsp;|&nbsp; <b>Bancos</b> /CuentaBancaria &nbsp;|&nbsp; <b>Aging</b> /CuentasPorPagar (desde 2026-06-01, DBOF)
       </div>
 
       <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-g" onclick="testConn()" id="btnTest">🔗 Probar conexión</button>
         <button class="btn btn-p" onclick="runVal()" id="btnRun">▶ Ejecutar conciliación cruzada</button>
+        <button class="btn btn-g" onclick="runTesoreria()" id="btnTes">💰 Auditar Tesorería</button>
         <span id="runStatus" style="font-size:11px;color:var(--muted);font-family:var(--mono)"></span>
       </div>
       <div id="progressWrap" style="display:none">
@@ -280,6 +278,59 @@
         <div class="box">
           <h3>🔍 Detalle de errores por documento</h3>
           <div id="detalle-errores-content"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TESORERÍA -->
+    <div class="panel" id="panel-tesoreria">
+      <div><div class="ptitle">💰 Tesorería</div><div class="psub">Pagos ejecutados · Saldos bancarios · Aging CxP (DBOF — desde 2026-06-01)</div></div>
+      <div class="cards" id="cards-tesoreria"><div class="empty"><div class="big">💰</div><div>Ejecuta la auditoría de tesorería desde Configuración</div></div></div>
+
+      <!-- Pagos con alertas -->
+      <div id="tes-pagos-section" style="display:none">
+        <div class="rh"><h3>⚠ Pagos con alertas</h3></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>ID Pago</th><th>Fecha</th><th>Proveedor</th><th>Monto</th><th>Referencia</th><th>Alertas</th></tr></thead>
+            <tbody id="tb-pagos"><tr><td colspan="6"><div class="empty">Sin datos</div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- CxP PAGADA sin egreso -->
+      <div id="tes-cxp-sin-pago-section" style="display:none">
+        <div class="rh"><h3>🔴 CxP marcadas PAGADA sin egreso registrado</h3></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>ID CxP</th><th>Documento</th><th>Proveedor</th><th>Monto</th></tr></thead>
+            <tbody id="tb-cxp-sin-pago"><tr><td colspan="4"><div class="empty">Sin datos</div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Saldos bancarios -->
+      <div id="tes-saldos-section" style="display:none">
+        <div class="rh"><h3 id="saldos-title">💳 Saldos bancarios</h3></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Banco</th><th>N° Cuenta</th><th>Disponible</th><th>Contable</th><th>Diferencia</th><th>Estado</th></tr></thead>
+            <tbody id="tb-saldos"><tr><td colspan="6"><div class="empty">Sin datos</div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Aging -->
+      <div id="tes-aging-section" style="display:none">
+        <div class="rh"><h3>📋 Aging de obligaciones (desde 2026-06-01)</h3></div>
+        <div class="cards" id="cards-aging"></div>
+        <div id="tes-critica-detail" style="display:none;margin-top:10px">
+          <div class="tw">
+            <table>
+              <thead><tr><th>ID CxP</th><th>Documento</th><th>Proveedor</th><th>Saldo</th><th>Días</th></tr></thead>
+              <tbody id="tb-critica"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -381,6 +432,7 @@ window.addEventListener('DOMContentLoaded', () => { initMsal(); onCompanySel(); 
 const S = {
   connected: false, demo: false,
   compras: [], // resultado conciliado
+  tesoreria: null,
   logs: []
 };
 
@@ -1080,6 +1132,278 @@ function demoContable() {
     { idDocumentoOrigen: 2177 },
     // 2185 sin contable intencionalmente
   ];
+}
+
+// ═══════════════════════════════════════════════
+// TESORERÍA — FETCH
+// ═══════════════════════════════════════════════
+const DBOF_INICIO = '2026-06-01';
+
+async function fetchPagosEjecutados(c) {
+  let all = [], pagina = 1, totalPaginas = 1;
+  do {
+    const raw = await apiGet('/CuentasPorPagar/pagos', { pagina, registrosPorPagina: 100, fechaDesde: c.desde, fechaHasta: c.hasta }, c);
+    const items = raw?.items ?? [];
+    totalPaginas = raw?.totalPaginas ?? 1;
+    all = all.concat(items);
+    pagina++;
+  } while (pagina <= totalPaginas);
+  log(`  Pagos ejecutados: ${all.length}`, 'ok');
+  return all;
+}
+
+async function fetchCuentasBancarias(c) {
+  const raw = await apiGet('/CuentaBancaria', {}, c);
+  const list = Array.isArray(raw) ? raw : [];
+  log(`  Cuentas bancarias: ${list.length}`, 'ok');
+  return list;
+}
+
+async function fetchCxpPorEstado(c, estados) {
+  const hasta = new Date().toISOString().slice(0, 10);
+  let all = [], page = 1, totalPages = 1;
+  do {
+    const raw = await apiGet('/CuentasPorPagar', { pageNumber: page, pageSize: 100, fechaIngresoDesde: DBOF_INICIO, fechaIngresoHasta: hasta }, c);
+    const items = (raw?.items ?? []).filter(r => estados.has((r.estado || '').toUpperCase()));
+    totalPages = raw?.totalPages ?? 1;
+    all = all.concat(items);
+    page++;
+  } while (page <= totalPages);
+  return all;
+}
+
+// ═══════════════════════════════════════════════
+// TESORERÍA — VALIDACIONES (mirror de tesorero.js)
+// ═══════════════════════════════════════════════
+function validarPagosHtml(pagos) {
+  const alertas = [];
+  for (const pago of pagos) {
+    const cxp = pago.cuentaPorPagar;
+    const errores = [];
+    if (!pago.contabilidad)
+      errores.push({ tipo: 'sin_partida', detalle: 'Pago sin partida contable' });
+    if (!pago.referencia && !pago.numeroCheque)
+      errores.push({ tipo: 'sin_respaldo', detalle: 'Sin referencia bancaria ni cheque' });
+    if (cxp) {
+      const diff = Math.abs(Math.round((pago.monto - cxp.montoTotal) * 100));
+      if (diff > 0) errores.push({ tipo: 'diferencia_monto', detalle: `Pagado $${(pago.monto ?? 0).toFixed(2)} ≠ CxP $${(cxp.montoTotal ?? 0).toFixed(2)}` });
+    }
+    if (errores.length > 0) alertas.push({
+      idPago: pago.idPago, idCxp: pago.idCuentaPorPagar,
+      fecha: pago.fechaPago, monto: pago.monto,
+      proveedor: cxp?.proveedor?.nombreproveedor ?? '—',
+      referencia: pago.referencia ?? pago.numeroCheque ?? null,
+      errores,
+    });
+  }
+  return alertas;
+}
+
+function detectarCxpPagadasSinPagoHtml(cxpPagadas, pagosIdx) {
+  return cxpPagadas
+    .filter(cxp => !pagosIdx.has(Number(cxp.idCuentaPorPagar ?? cxp.id)))
+    .map(cxp => ({
+      idCxp: cxp.idCuentaPorPagar ?? cxp.id,
+      documento: cxp.numeroDocumento ?? '—',
+      proveedor: cxp.proveedor ?? '—',
+      monto: cxp.montoTotal ?? 0,
+    }));
+}
+
+function validarSaldosHtml(cuentas) {
+  const alertas = [];
+  for (const cuenta of cuentas) {
+    const diff = Math.abs((cuenta.saldo_disponible ?? 0) - (cuenta.saldo_contable ?? 0));
+    if (diff > 0.02) alertas.push({ tipo: 'descuadre', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0, diff });
+    if (cuenta.activa && !cuenta.ncuenta) alertas.push({ tipo: 'sin_cuenta_contable', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0, diff: 0 });
+    if (!cuenta.activa && (cuenta.saldo_disponible ?? 0) > 0) alertas.push({ tipo: 'inactiva_con_saldo', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0, diff: 0 });
+  }
+  return alertas;
+}
+
+function calcularAgingHtml(cxpPendientes) {
+  const hoy = new Date();
+  const buckets = { corriente: [], riesgo: [], vencida: [], critica: [] };
+  let totalPendiente = 0;
+  for (const cxp of cxpPendientes) {
+    const saldo = cxp.saldoPendiente ?? cxp.montoTotal ?? 0;
+    if (saldo <= 0) continue;
+    const fechaRef = new Date(cxp.fechaIngreso ?? cxp.fechaVencimiento ?? hoy);
+    const dias = Math.floor((hoy - fechaRef) / (1000 * 60 * 60 * 24));
+    totalPendiente += saldo;
+    const item = { idCxp: cxp.idCuentaPorPagar ?? cxp.id, documento: cxp.numeroDocumento ?? '—', proveedor: cxp.proveedor ?? '—', saldo, dias };
+    if (dias <= 30) buckets.corriente.push(item);
+    else if (dias <= 60) buckets.riesgo.push(item);
+    else if (dias <= 90) buckets.vencida.push(item);
+    else buckets.critica.push(item);
+  }
+  const sumar = arr => arr.reduce((s, x) => s + x.saldo, 0);
+  return {
+    totalPendiente,
+    corriente: { count: buckets.corriente.length, monto: sumar(buckets.corriente) },
+    riesgo:    { count: buckets.riesgo.length,    monto: sumar(buckets.riesgo) },
+    vencida:   { count: buckets.vencida.length,   monto: sumar(buckets.vencida) },
+    critica:   { count: buckets.critica.length,   monto: sumar(buckets.critica), items: buckets.critica },
+  };
+}
+
+// ═══════════════════════════════════════════════
+// TESORERÍA — ORQUESTADOR
+// ═══════════════════════════════════════════════
+async function runTesoreria() {
+  const btn = document.getElementById('btnTes');
+  btn.disabled = true; btn.innerHTML = '<div class="spin"></div> Auditando...';
+  log('════ INICIO AUDITORÍA TESORERÍA ════', 'info');
+  if (!S.connected) { S.connected = true; S.demo = true; setSt(true, 'DEMO'); }
+  const c = cfg();
+
+  prog(10, 'Cargando pagos ejecutados...');
+  let pagos = [];
+  try { pagos = await fetchPagosEjecutados(c); }
+  catch (e) { log(`Error pagos: ${e.message}`, 'err'); }
+
+  prog(30, 'Cargando cuentas bancarias...');
+  let cuentas = [];
+  try { cuentas = await fetchCuentasBancarias(c); }
+  catch (e) { log(`Error cuentas: ${e.message}`, 'err'); }
+
+  prog(50, `Cargando CxP pendientes (aging desde ${DBOF_INICIO})...`);
+  let cxpPendientes = [];
+  try { cxpPendientes = await fetchCxpPorEstado(c, new Set(['PENDIENTE', 'PARCIAL', 'VENCIDA'])); log(`  CxP pendientes (aging): ${cxpPendientes.length}`, 'ok'); }
+  catch (e) { log(`Error aging: ${e.message}`, 'err'); }
+
+  prog(72, 'Cargando CxP marcadas PAGADA...');
+  let cxpPagadas = [];
+  try { cxpPagadas = await fetchCxpPorEstado(c, new Set(['PAGADA'])); log(`  CxP pagadas: ${cxpPagadas.length}`, 'ok'); }
+  catch (e) { log(`Error CxP pagadas: ${e.message}`, 'err'); }
+
+  prog(88, 'Validando...');
+  const alertasPagos  = validarPagosHtml(pagos);
+  const pagosIdx      = new Set(pagos.map(p => Number(p.idCuentaPorPagar)));
+  const cxpSinPago    = detectarCxpPagadasSinPagoHtml(cxpPagadas, pagosIdx);
+  const alertasSaldos = validarSaldosHtml(cuentas);
+  const aging         = calcularAgingHtml(cxpPendientes);
+
+  const totalAlertas = alertasPagos.length + cxpSinPago.length + alertasSaldos.length;
+  const semaforo = totalAlertas === 0 ? 'VERDE'
+    : (alertasPagos.some(a => a.errores.some(e => e.tipo === 'sin_partida')) || cxpSinPago.length > 0) ? 'ROJO'
+    : 'AMARILLO';
+
+  S.tesoreria = { pagos, cuentas, alertasPagos, cxpSinPago, alertasSaldos, aging, semaforo, desde: c.desde, hasta: c.hasta };
+  renderTesoreria(S.tesoreria);
+
+  const b = document.getElementById('b-tesoreria');
+  b.textContent = totalAlertas > 0 ? totalAlertas : '✓';
+  b.className = 'nbadge ' + (totalAlertas > 0 ? 'b-err' : 'b-ok');
+  b.style.display = '';
+
+  sp('tesoreria');
+  log(`════ TESORERÍA: ${totalAlertas} alertas | Semáforo: ${semaforo} ════`, totalAlertas > 0 ? 'warn' : 'ok');
+  prog(100, 'Completado ✓');
+  await delay(700); hideProg();
+  btn.disabled = false; btn.innerHTML = '💰 Auditar Tesorería';
+}
+
+// ═══════════════════════════════════════════════
+// TESORERÍA — RENDER
+// ═══════════════════════════════════════════════
+function renderTesoreria(t) {
+  const { pagos, cuentas, alertasPagos, cxpSinPago, alertasSaldos, aging, semaforo, desde, hasta } = t;
+  const totalAlertas = alertasPagos.length + cxpSinPago.length + alertasSaldos.length;
+  const semaforoEmoji = semaforo === 'ROJO' ? '🔴' : semaforo === 'AMARILLO' ? '🟡' : '🟢';
+  const totalDisp = cuentas.reduce((s, c) => s + (c.saldo_disponible ?? 0), 0);
+  const totalCont = cuentas.reduce((s, c) => s + (c.saldo_contable ?? 0), 0);
+  const descuadreTotal = Math.abs(totalDisp - totalCont);
+  const sinPartida = alertasPagos.filter(a => a.errores.some(e => e.tipo === 'sin_partida')).length;
+
+  document.getElementById('cards-tesoreria').innerHTML = `
+    <div class="card"><div class="clabel">Semáforo</div><div class="cval ${semaforo === 'VERDE' ? 'ok' : semaforo === 'ROJO' ? 'err' : 'warn'}">${semaforoEmoji}</div></div>
+    <div class="card"><div class="clabel">Posición bancaria</div><div class="cval neu">$${fmt(totalDisp)}</div><div class="csub">${descuadreTotal > 0.02 ? '⚠ Descuadre $' + fmt(descuadreTotal) : '✓ Cuadrado'}</div></div>
+    <div class="card"><div class="clabel">Total pagos</div><div class="cval neu">${pagos.length}</div><div class="csub">${desde} → ${hasta}</div></div>
+    <div class="card"><div class="clabel">Alertas pagos</div><div class="cval ${alertasPagos.length > 0 ? 'err' : 'ok'}">${alertasPagos.length}</div>${sinPartida > 0 ? `<div class="csub">${sinPartida} sin partida</div>` : ''}</div>
+    <div class="card"><div class="clabel">CxP sin egreso</div><div class="cval ${cxpSinPago.length > 0 ? 'err' : 'ok'}">${cxpSinPago.length}</div></div>
+    <div class="card"><div class="clabel">Alertas bancarias</div><div class="cval ${alertasSaldos.length > 0 ? 'warn' : 'ok'}">${alertasSaldos.length}</div></div>
+    <div class="card"><div class="clabel">Crítico +90 días</div><div class="cval ${aging.critica.count > 0 ? 'warn' : 'ok'}">${aging.critica.count > 0 ? '$' + fmt(aging.critica.monto) : '—'}</div><div class="csub">${aging.critica.count} CxP</div></div>`;
+
+  // Pagos con alertas
+  const pagosSec = document.getElementById('tes-pagos-section');
+  if (alertasPagos.length > 0) {
+    pagosSec.style.display = '';
+    document.getElementById('tb-pagos').innerHTML = alertasPagos.map(a => {
+      const tags = a.errores.map(e => ({
+        sin_partida:     '<span class="tag terr">Sin partida</span>',
+        sin_respaldo:    '<span class="tag terr">Sin respaldo</span>',
+        diferencia_monto:'<span class="tag twrn">Diff monto</span>',
+      }[e.tipo] ?? `<span class="tag tinf">${e.tipo}</span>`)).join(' ');
+      return `<tr style="background:rgba(255,61,90,.04)">
+        <td style="color:var(--muted);font-size:10px">#${a.idPago}</td>
+        <td>${(a.fecha ?? '').slice(0, 10)}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.proveedor}</td>
+        <td>$${fmt(a.monto)}</td>
+        <td style="color:var(--muted)">${a.referencia ?? '—'}</td>
+        <td>${tags}</td></tr>`;
+    }).join('');
+  } else { pagosSec.style.display = 'none'; }
+
+  // CxP PAGADA sin egreso
+  const cxpSec = document.getElementById('tes-cxp-sin-pago-section');
+  if (cxpSinPago.length > 0) {
+    cxpSec.style.display = '';
+    document.getElementById('tb-cxp-sin-pago').innerHTML = cxpSinPago.map(a =>
+      `<tr style="background:rgba(255,61,90,.04)">
+        <td style="color:var(--muted);font-size:10px">#${a.idCxp}</td>
+        <td>${a.documento}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${a.proveedor}</td>
+        <td>$${fmt(a.monto)}</td></tr>`
+    ).join('');
+  } else { cxpSec.style.display = 'none'; }
+
+  // Saldos bancarios — todas las cuentas con estado
+  const saldosSec = document.getElementById('tes-saldos-section');
+  if (cuentas.length > 0) {
+    saldosSec.style.display = '';
+    document.getElementById('saldos-title').textContent = `💳 Saldos bancarios (${cuentas.length} cuentas)`;
+    document.getElementById('tb-saldos').innerHTML = cuentas.map(c => {
+      const alerta = alertasSaldos.find(a => a.numero === c.numero_cuenta);
+      const diff = Math.abs((c.saldo_disponible ?? 0) - (c.saldo_contable ?? 0));
+      const estadoTag = alerta ? {
+        descuadre:          '<span class="tag twrn">⚠ Descuadre</span>',
+        sin_cuenta_contable:'<span class="tag twrn">⚠ Sin ctable</span>',
+        inactiva_con_saldo: '<span class="tag terr">⚠ Inactiva+saldo</span>',
+      }[alerta.tipo] ?? '<span class="tag twrn">⚠ Alerta</span>'
+        : '<span class="tag tok">✓ OK</span>';
+      return `<tr style="background:${alerta ? 'rgba(255,184,0,.03)' : 'transparent'}">
+        <td>${c.nombre_banco ?? c.id_banco ?? '—'}</td>
+        <td style="font-family:var(--mono)">${c.numero_cuenta ?? '—'}</td>
+        <td>$${fmt(c.saldo_disponible)}</td>
+        <td>$${fmt(c.saldo_contable)}</td>
+        <td style="color:${diff > 0.02 ? 'var(--warn)' : 'var(--muted)'}">${diff > 0.02 ? '$' + fmt(diff) : '—'}</td>
+        <td>${estadoTag}</td></tr>`;
+    }).join('');
+  } else { saldosSec.style.display = 'none'; }
+
+  // Aging
+  const agingSec = document.getElementById('tes-aging-section');
+  agingSec.style.display = '';
+  document.getElementById('cards-aging').innerHTML = `
+    <div class="card"><div class="clabel">0–30 días (corriente)</div><div class="cval ok">$${fmt(aging.corriente.monto)}</div><div class="csub">${aging.corriente.count} CxP</div></div>
+    <div class="card"><div class="clabel">31–60 días (riesgo)</div><div class="cval ${aging.riesgo.monto > 0 ? 'warn' : 'ok'}">$${fmt(aging.riesgo.monto)}</div><div class="csub">${aging.riesgo.count} CxP</div></div>
+    <div class="card"><div class="clabel">61–90 días (vencida)</div><div class="cval ${aging.vencida.monto > 0 ? 'warn' : 'ok'}">$${fmt(aging.vencida.monto)}</div><div class="csub">${aging.vencida.count} CxP</div></div>
+    <div class="card"><div class="clabel">+90 días (crítica)</div><div class="cval ${aging.critica.count > 0 ? 'err' : 'ok'}">$${fmt(aging.critica.monto)}</div><div class="csub">${aging.critica.count} CxP${aging.critica.count > 0 ? ' ⚠' : ''}</div></div>
+    <div class="card"><div class="clabel">Total pasivo corriente</div><div class="cval neu">$${fmt(aging.totalPendiente)}</div><div class="csub">desde ${DBOF_INICIO}</div></div>`;
+
+  const critSec = document.getElementById('tes-critica-detail');
+  if (aging.critica.count > 0) {
+    critSec.style.display = '';
+    document.getElementById('tb-critica').innerHTML = aging.critica.items.map(item =>
+      `<tr style="background:rgba(255,61,90,.04)">
+        <td style="color:var(--muted);font-size:10px">#${item.idCxp}</td>
+        <td>${item.documento}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis">${item.proveedor}</td>
+        <td style="color:var(--danger)">$${fmt(item.saldo)}</td>
+        <td style="color:var(--danger)">${item.dias} días</td></tr>`
+    ).join('');
+  } else { critSec.style.display = 'none'; }
 }
 
 function onCompanySel() {
