@@ -1308,11 +1308,13 @@ async function runTesoreria() {
   const aging         = calcularAgingHtml(cxpPendientes);
 
   const totalAlertas = alertasPagos.length + cxpSinPago.length + alertasSaldos.length;
-  const semaforo = totalAlertas === 0 ? 'VERDE'
-    : alertasPagos.some(a => a.errores.some(e => e.tipo === 'sin_partida')) ? 'ROJO'
-    : 'AMARILLO';
+  const totalDisponibleEmpresa = cuentas.reduce((s, c2) => s + (c2.saldo_disponible ?? 0), 0);
+  const limitacionAlcance = cuentas.length > 0 && totalDisponibleEmpresa === 0;
+  const semaforo = alertasPagos.some(a => a.errores.some(e => e.tipo === 'sin_partida')) ? 'ROJO'
+    : (totalAlertas > 0 || limitacionAlcance) ? 'AMARILLO'
+    : 'VERDE';
 
-  S.tesoreria = { pagos, cuentas, alertasPagos, cxpSinPago, alertasSaldos, aging, semaforo, desde: c.desde, hasta: c.hasta };
+  S.tesoreria = { pagos, cuentas, alertasPagos, cxpSinPago, alertasSaldos, aging, semaforo, limitacionAlcance, desde: c.desde, hasta: c.hasta };
   renderTesoreria(S.tesoreria);
 
   const b = document.getElementById('b-tesoreria');
@@ -1331,15 +1333,18 @@ async function runTesoreria() {
 // TESORERÍA — RENDER
 // ═══════════════════════════════════════════════
 function renderTesoreria(t) {
-  const { pagos, cuentas, alertasPagos, cxpSinPago, alertasSaldos, aging, semaforo, desde, hasta } = t;
+  const { pagos, cuentas, alertasPagos, cxpSinPago, alertasSaldos, aging, semaforo, limitacionAlcance, desde, hasta } = t;
   const totalAlertas = alertasPagos.length + cxpSinPago.length + alertasSaldos.length;
   const semaforoEmoji = semaforo === 'ROJO' ? '🔴' : semaforo === 'AMARILLO' ? '🟡' : '🟢';
   const totalDisp = cuentas.reduce((s, c) => s + (c.saldo_disponible ?? 0), 0);
   const sinPartida = alertasPagos.filter(a => a.errores.some(e => e.tipo === 'sin_partida')).length;
+  const posicionCard = limitacionAlcance
+    ? `<div class="card"><div class="clabel">Posición bancaria</div><div class="cval warn" title="Limitación de alcance — el endpoint no devuelve saldos reales">⚠ $0.00</div><div class="csub">Limitación de alcance</div></div>`
+    : `<div class="card"><div class="clabel">Posición bancaria</div><div class="cval neu">$${fmt(totalDisp)}</div></div>`;
 
   document.getElementById('cards-tesoreria').innerHTML = `
     <div class="card"><div class="clabel">Semáforo</div><div class="cval ${semaforo === 'VERDE' ? 'ok' : semaforo === 'ROJO' ? 'err' : 'warn'}">${semaforoEmoji}</div></div>
-    <div class="card"><div class="clabel">Posición bancaria</div><div class="cval neu">$${fmt(totalDisp)}</div></div>
+    ${posicionCard}
     <div class="card"><div class="clabel">Total pagos</div><div class="cval neu">${pagos.length}</div><div class="csub">${desde} → ${hasta}</div></div>
     <div class="card"><div class="clabel">Alertas pagos</div><div class="cval ${alertasPagos.length > 0 ? 'err' : 'ok'}">${alertasPagos.length}</div>${sinPartida > 0 ? `<div class="csub">${sinPartida} sin partida</div>` : ''}</div>
     <div class="card"><div class="clabel">CxP sin egreso</div><div class="cval ${cxpSinPago.length > 0 ? 'err' : 'ok'}">${cxpSinPago.length}</div></div>
