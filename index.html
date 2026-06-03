@@ -1149,7 +1149,6 @@ async function fetchPagosEjecutados(c) {
     pagina++;
   } while (pagina <= totalPaginas);
   log(`  Pagos ejecutados: ${all.length}`, 'ok');
-  if (all.length > 0) console.log('[DEBUG] Pago[0] raw:', JSON.stringify(all[0], null, 2));
   return all;
 }
 
@@ -1284,17 +1283,15 @@ async function runTesoreria() {
   prog(88, 'Validando...');
   const alertasPagos  = validarPagosHtml(pagos);
   const pagosIdx      = new Set(pagos.map(p => Number(p.idCuentaPorPagar)));
-  // Para CxP PAGADA sin egreso: ampliar ventana a todo DBOF (reduce falsos positivos
-  // por pagos registrados fuera del período seleccionado o en fechas distintas)
+  // Para CxP PAGADA sin egreso: siempre buscar pagos desde DBOF_INICIO
+  // independientemente del período seleccionado por el usuario
   let pagosIdxAmplio = pagosIdx;
-  if (c.desde > DBOF_INICIO) {
-    try {
-      const hoy = new Date().toISOString().slice(0, 10);
-      const pagosAmplio = await fetchPagosEjecutados({ ...c, desde: DBOF_INICIO, hasta: hoy });
-      pagosIdxAmplio = new Set(pagosAmplio.map(p => Number(p.idCuentaPorPagar)));
-      log(`  Pagos DBOF (ventana amplia): ${pagosAmplio.length}`, 'ok');
-    } catch(e) { /* usar índice del período */ }
-  }
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const pagosAmplio = await fetchPagosEjecutados({ ...c, desde: DBOF_INICIO, hasta: hoy });
+    pagosIdxAmplio = new Set(pagosAmplio.map(p => Number(p.idCuentaPorPagar)));
+    log(`  Pagos DBOF (ventana amplia): ${pagosAmplio.length}`, 'ok');
+  } catch(e) { /* usar índice del período */ }
   const cxpSinPago    = detectarCxpPagadasSinPagoHtml(cxpPagadas, pagosIdxAmplio);
   const alertasSaldos = validarSaldosHtml(cuentas);
   const aging         = calcularAgingHtml(cxpPendientes);
