@@ -1149,6 +1149,7 @@ async function fetchPagosEjecutados(c) {
     pagina++;
   } while (pagina <= totalPaginas);
   log(`  Pagos ejecutados: ${all.length}`, 'ok');
+  if (all.length > 0) console.log('[DEBUG] Pago[0] raw:', JSON.stringify(all[0], null, 2));
   return all;
 }
 
@@ -1182,8 +1183,13 @@ function validarPagosHtml(pagos) {
     const errores = [];
     if (!pago.contabilidad)
       errores.push({ tipo: 'sin_partida', detalle: 'Pago sin partida contable' });
-    if (!pago.referencia && !pago.numeroCheque)
-      errores.push({ tipo: 'sin_respaldo', detalle: 'Sin referencia bancaria ni cheque' });
+    const tieneRespaldo = pago.referencia || pago.Referencia
+      || pago.numeroCheque || pago.NumeroCheque
+      || pago.observaciones || pago.Observaciones
+      || pago.idFormaPago || pago.IdFormaPago
+      || pago.formaPago || pago.FormaPago;
+    if (!tieneRespaldo)
+      errores.push({ tipo: 'sin_respaldo', detalle: 'Sin referencia, cheque, comprobante ni forma de pago registrada' });
     if (cxp) {
       const diff = Math.abs(Math.round((pago.monto - cxp.montoTotal) * 100));
       if (diff > 0) errores.push({ tipo: 'diferencia_monto', detalle: `Pagado $${(pago.monto ?? 0).toFixed(2)} ≠ CxP $${(cxp.montoTotal ?? 0).toFixed(2)}` });
@@ -1205,7 +1211,7 @@ function detectarCxpPagadasSinPagoHtml(cxpPagadas, pagosIdx) {
     .map(cxp => ({
       idCxp: cxp.idCuentaPorPagar ?? cxp.id,
       documento: cxp.numeroDocumento ?? '—',
-      proveedor: cxp.proveedor ?? '—',
+      proveedor: cxp.proveedor?.nombreproveedor ?? cxp.proveedor ?? '—',
       monto: cxp.montoTotal ?? 0,
     }));
 }
@@ -1213,10 +1219,8 @@ function detectarCxpPagadasSinPagoHtml(cxpPagadas, pagosIdx) {
 function validarSaldosHtml(cuentas) {
   const alertas = [];
   for (const cuenta of cuentas) {
-    const diff = Math.abs((cuenta.saldo_disponible ?? 0) - (cuenta.saldo_contable ?? 0));
-    if (diff > 0.02) alertas.push({ tipo: 'descuadre', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0, diff });
-    if (cuenta.activa && !cuenta.ncuenta) alertas.push({ tipo: 'sin_cuenta_contable', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0, diff: 0 });
-    if (!cuenta.activa && (cuenta.saldo_disponible ?? 0) > 0) alertas.push({ tipo: 'inactiva_con_saldo', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0, diff: 0 });
+    if (cuenta.activa && !cuenta.ncuenta) alertas.push({ tipo: 'sin_cuenta_contable', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0 });
+    if (!cuenta.activa && (cuenta.saldo_disponible ?? 0) > 0) alertas.push({ tipo: 'inactiva_con_saldo', banco: cuenta.nombre_banco ?? cuenta.id_banco, numero: cuenta.numero_cuenta, disponible: cuenta.saldo_disponible ?? 0, contable: cuenta.saldo_contable ?? 0 });
   }
   return alertas;
 }
@@ -1280,13 +1284,24 @@ async function runTesoreria() {
   prog(88, 'Validando...');
   const alertasPagos  = validarPagosHtml(pagos);
   const pagosIdx      = new Set(pagos.map(p => Number(p.idCuentaPorPagar)));
-  const cxpSinPago    = detectarCxpPagadasSinPagoHtml(cxpPagadas, pagosIdx);
+  // Para CxP PAGADA sin egreso: ampliar ventana a todo DBOF (reduce falsos positivos
+  // por pagos registrados fuera del período seleccionado o en fechas distintas)
+  let pagosIdxAmplio = pagosIdx;
+  if (c.desde > DBOF_INICIO) {
+    try {
+      const hoy = new Date().toISOString().slice(0, 10);
+      const pagosAmplio = await fetchPagosEjecutados({ ...c, desde: DBOF_INICIO, hasta: hoy });
+      pagosIdxAmplio = new Set(pagosAmplio.map(p => Number(p.idCuentaPorPagar)));
+      log(`  Pagos DBOF (ventana amplia): ${pagosAmplio.length}`, 'ok');
+    } catch(e) { /* usar índice del período */ }
+  }
+  const cxpSinPago    = detectarCxpPagadasSinPagoHtml(cxpPagadas, pagosIdxAmplio);
   const alertasSaldos = validarSaldosHtml(cuentas);
   const aging         = calcularAgingHtml(cxpPendientes);
 
   const totalAlertas = alertasPagos.length + cxpSinPago.length + alertasSaldos.length;
   const semaforo = totalAlertas === 0 ? 'VERDE'
-    : (alertasPagos.some(a => a.errores.some(e => e.tipo === 'sin_partida')) || cxpSinPago.length > 0) ? 'ROJO'
+    : alertasPagos.some(a => a.errores.some(e => e.tipo === 'sin_partida')) ? 'ROJO'
     : 'AMARILLO';
 
   S.tesoreria = { pagos, cuentas, alertasPagos, cxpSinPago, alertasSaldos, aging, semaforo, desde: c.desde, hasta: c.hasta };
@@ -1312,13 +1327,11 @@ function renderTesoreria(t) {
   const totalAlertas = alertasPagos.length + cxpSinPago.length + alertasSaldos.length;
   const semaforoEmoji = semaforo === 'ROJO' ? '🔴' : semaforo === 'AMARILLO' ? '🟡' : '🟢';
   const totalDisp = cuentas.reduce((s, c) => s + (c.saldo_disponible ?? 0), 0);
-  const totalCont = cuentas.reduce((s, c) => s + (c.saldo_contable ?? 0), 0);
-  const descuadreTotal = Math.abs(totalDisp - totalCont);
   const sinPartida = alertasPagos.filter(a => a.errores.some(e => e.tipo === 'sin_partida')).length;
 
   document.getElementById('cards-tesoreria').innerHTML = `
     <div class="card"><div class="clabel">Semáforo</div><div class="cval ${semaforo === 'VERDE' ? 'ok' : semaforo === 'ROJO' ? 'err' : 'warn'}">${semaforoEmoji}</div></div>
-    <div class="card"><div class="clabel">Posición bancaria</div><div class="cval neu">$${fmt(totalDisp)}</div><div class="csub">${descuadreTotal > 0.02 ? '⚠ Descuadre $' + fmt(descuadreTotal) : '✓ Cuadrado'}</div></div>
+    <div class="card"><div class="clabel">Posición bancaria</div><div class="cval neu">$${fmt(totalDisp)}</div></div>
     <div class="card"><div class="clabel">Total pagos</div><div class="cval neu">${pagos.length}</div><div class="csub">${desde} → ${hasta}</div></div>
     <div class="card"><div class="clabel">Alertas pagos</div><div class="cval ${alertasPagos.length > 0 ? 'err' : 'ok'}">${alertasPagos.length}</div>${sinPartida > 0 ? `<div class="csub">${sinPartida} sin partida</div>` : ''}</div>
     <div class="card"><div class="clabel">CxP sin egreso</div><div class="cval ${cxpSinPago.length > 0 ? 'err' : 'ok'}">${cxpSinPago.length}</div></div>
@@ -1367,7 +1380,6 @@ function renderTesoreria(t) {
       const alerta = alertasSaldos.find(a => a.numero === c.numero_cuenta);
       const diff = Math.abs((c.saldo_disponible ?? 0) - (c.saldo_contable ?? 0));
       const estadoTag = alerta ? {
-        descuadre:          '<span class="tag twrn">⚠ Descuadre</span>',
         sin_cuenta_contable:'<span class="tag twrn">⚠ Sin ctable</span>',
         inactiva_con_saldo: '<span class="tag terr">⚠ Inactiva+saldo</span>',
       }[alerta.tipo] ?? '<span class="tag twrn">⚠ Alerta</span>'
