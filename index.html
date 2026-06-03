@@ -287,6 +287,17 @@
       <div><div class="ptitle">💰 Tesorería</div><div class="psub">Pagos ejecutados · Saldos bancarios · Aging CxP (DBOF — desde 2026-06-01)</div></div>
       <div class="cards" id="cards-tesoreria"><div class="empty"><div class="big">💰</div><div>Ejecuta la auditoría de tesorería desde Configuración</div></div></div>
 
+      <!-- Todos los pagos ejecutados -->
+      <div id="tes-pagos-todos-section" style="display:none">
+        <div class="rh"><h3 id="tes-pagos-todos-title">💳 Pagos ejecutados</h3></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>ID</th><th>Fecha</th><th>Proveedor</th><th>Monto</th><th>Forma de pago</th><th>Referencia</th><th>Estado</th></tr></thead>
+            <tbody id="tb-pagos-todos"><tr><td colspan="7"><div class="empty">Sin datos</div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Pagos con alertas -->
       <div id="tes-pagos-section" style="display:none">
         <div class="rh"><h3>⚠ Pagos con alertas</h3></div>
@@ -1334,6 +1345,27 @@ function renderTesoreria(t) {
     <div class="card"><div class="clabel">CxP sin egreso</div><div class="cval ${cxpSinPago.length > 0 ? 'err' : 'ok'}">${cxpSinPago.length}</div></div>
     <div class="card"><div class="clabel">Alertas bancarias</div><div class="cval ${alertasSaldos.length > 0 ? 'warn' : 'ok'}">${alertasSaldos.length}</div></div>
     <div class="card"><div class="clabel">Crítico +90 días</div><div class="cval ${aging.critica.count > 0 ? 'warn' : 'ok'}">${aging.critica.count > 0 ? '$' + fmt(aging.critica.monto) : '—'}</div><div class="csub">${aging.critica.count} CxP</div></div>`;
+
+  // Todos los pagos ejecutados
+  const pagosTodosSec = document.getElementById('tes-pagos-todos-section');
+  if (pagos.length > 0) {
+    pagosTodosSec.style.display = '';
+    document.getElementById('tes-pagos-todos-title').textContent = `💳 Pagos ejecutados (${pagos.length})`;
+    document.getElementById('tb-pagos-todos').innerHTML = pagos.map(p => {
+      const prov = p.cuentaPorPagar?.proveedor?.nombreproveedor ?? p.cuentaPorPagar?.proveedor ?? '—';
+      const formaPago = p.formaPago?.nombre_forma_pago ?? p.FormaPago?.nombre_forma_pago ?? '—';
+      const ref = p.referencia ?? p.numeroCheque ?? '—';
+      const conPartida = p.contabilidad;
+      return `<tr>
+        <td style="color:var(--muted);font-size:10px">#${p.idPago}</td>
+        <td>${(p.fechaPago ?? '').slice(0, 10)}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${prov}</td>
+        <td>$${fmt(p.monto)}</td>
+        <td>${formaPago}</td>
+        <td style="color:var(--muted)">${ref}</td>
+        <td>${conPartida ? '<span class="tag tok">✓ Contabilizado</span>' : '<span class="tag terr">Sin partida</span>'}</td></tr>`;
+    }).join('');
+  } else { pagosTodosSec.style.display = 'none'; }
 
   // Pagos con alertas
   const pagosSec = document.getElementById('tes-pagos-section');
