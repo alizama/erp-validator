@@ -502,7 +502,7 @@ let _revLoaded   = false;
 
 async function loadRevenue() {
   if (_revLoaded) return;
-  const token = S.token;
+  const token = document.getElementById('cfg_token')?.value;
   if (!token) { renderRevError('Inicia sesión primero'); return; }
 
   const c = getConfig();
