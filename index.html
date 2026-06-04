@@ -541,7 +541,8 @@ function renderRevData(results, desde, hasta) {
 
   const cards = results.map(r => {
     const nombre = NAMES_REV[r.id];
-    if (!r.autorizado || r.error) return `<div class="card"><div class="clabel">⚪ ${nombre}</div><div class="cval neu">Bloqueado</div><div class="csub">Directiva Restrictiva DBOF-REV</div></div>`;
+    if (r.error) return `<div class="card"><div class="clabel">⚠ ${nombre}</div><div class="cval warn">Error SICI</div><div class="csub" title="${r.error}">${r.error.slice(0,60)}</div></div>`;
+    if (!r.autorizado) return `<div class="card"><div class="clabel">⚪ ${nombre}</div><div class="cval neu">Bloqueado</div><div class="csub">Directiva Restrictiva DBOF-REV</div></div>`;
     if (r.ingresosNetos === 0) return `<div class="card"><div class="clabel">🟡 ${nombre}</div><div class="cval warn">$0.00</div><div class="csub">Sin ventas registradas</div></div>`;
     holdingTotal   += r.ingresosNetos;
     holdingTickets += r.tickets;
