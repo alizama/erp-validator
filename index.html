@@ -287,39 +287,8 @@
     <div class="panel" id="panel-revenue">
       <div><div class="ptitle">📈 Control de Revenue</div><div class="psub">Ingresos acumulados del mes · Cireba · Santa Burguesa · Barrio La Boca</div></div>
       <div class="cards" id="cards-revenue">
-        <div class="card">
-          <div class="clabel">📈 Ingresos holding (neto)</div>
-          <div class="cval ok">$187,432.50</div>
-          <div class="csub">01/06 → 04/06 · 3 empresas</div>
-        </div>
-        <div class="card">
-          <div class="clabel">🟢 Cireba (Buffalo Wings SV)</div>
-          <div class="cval ok">$98,214.75</div>
-          <div class="csub">Prom. diario $24,553.69 · 1,842 tickets</div>
-        </div>
-        <div class="card">
-          <div class="clabel">🟢 Santa Burguesa</div>
-          <div class="cval ok">$54,107.30</div>
-          <div class="csub">Prom. diario $13,526.83 · 963 tickets</div>
-        </div>
-        <div class="card">
-          <div class="clabel">🟢 Inversiones Barrio La Boca</div>
-          <div class="cval ok">$35,110.45</div>
-          <div class="csub">Prom. diario $8,777.61 · 621 tickets</div>
-        </div>
-        <div class="card">
-          <div class="clabel">⚪ Otras sociedades</div>
-          <div class="cval neu">Bloqueado</div>
-          <div class="csub">Directiva Restrictiva DBOF-REV</div>
-        </div>
-        <!-- Stress: solo aparece si aging 0-30 > 1.5× ingresos. Ejemplo con alerta activa -->
-        <div class="card" style="border-left:3px solid #f59e0b">
-          <div class="clabel">⚠ Stress de Liquidez</div>
-          <div class="cval warn">ACTIVO</div>
-          <div class="csub">Aging $185,663 &gt; 1.5× ingresos $187,432</div>
-        </div>
+        <div class="empty"><div class="big">📈</div><div>Abre este panel para cargar datos en vivo desde SICI</div></div>
       </div>
-      <div style="font-size:11px;color:#888;padding:4px 12px 8px">⚠ Datos de ejemplo — conexión SICI activa en reporte automático</div>
     </div>
 
     <!-- TESORERÍA -->
@@ -520,6 +489,87 @@ function sp(id) {
   const nav = document.getElementById('nav-' + id);
   if (nav) nav.classList.add('active');
   else document.querySelector('.ni').classList.add('active');
+  if (id === 'revenue') loadRevenue();
+}
+
+// ═══════════════════════════════════════════════
+// REVENUE — carga desde bot (Azure Container Apps)
+// ═══════════════════════════════════════════════
+const BOT_URL    = 'https://chepe-auditor.thankfulwave-70c7c9b7.eastus.azurecontainerapps.io';
+const NAMES_REV  = { '25': 'Cireba (Buffalo Wings SV)', '2': 'Santa Burguesa', '3': 'Inversiones Barrio La Boca' };
+const IDS_REV    = ['25', '2', '3'];
+let _revLoaded   = false;
+
+async function loadRevenue() {
+  if (_revLoaded) return;
+  const token = S.token;
+  if (!token) { renderRevError('Inicia sesión primero'); return; }
+
+  const c = getConfig();
+  const desde = c.desde || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+  const hasta = c.hasta || new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+  renderRevLoading();
+  try {
+    const results = await Promise.all(IDS_REV.map(id =>
+      fetch(`${BOT_URL}/api/revenue?desde=${desde}&hasta=${hasta}&empresa=${id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(r => r.json()).then(d => ({ id, ...d }))
+    ));
+    renderRevData(results, desde, hasta);
+    _revLoaded = true;
+  } catch (e) {
+    renderRevError(e.message);
+  }
+}
+
+function renderRevLoading() {
+  document.getElementById('cards-revenue').innerHTML =
+    `<div class="empty"><div class="big">📈</div><div>Consultando SICI...</div></div>`;
+}
+
+function renderRevError(msg) {
+  document.getElementById('cards-revenue').innerHTML =
+    `<div class="empty"><div class="big">⚠</div><div>${msg}</div></div>`;
+}
+
+function renderRevData(results, desde, hasta) {
+  let holdingTotal = 0;
+  let holdingTickets = 0;
+  let stressData = null;
+
+  const cards = results.map(r => {
+    const nombre = NAMES_REV[r.id];
+    if (!r.autorizado || r.error) return `<div class="card"><div class="clabel">⚪ ${nombre}</div><div class="cval neu">Bloqueado</div><div class="csub">Directiva Restrictiva DBOF-REV</div></div>`;
+    if (r.ingresosNetos === 0) return `<div class="card"><div class="clabel">🟡 ${nombre}</div><div class="cval warn">$0.00</div><div class="csub">Sin ventas registradas</div></div>`;
+    holdingTotal   += r.ingresosNetos;
+    holdingTickets += r.tickets;
+    return `<div class="card">
+      <div class="clabel">🟢 ${nombre}</div>
+      <div class="cval ok">$${fmt(r.ingresosNetos)}</div>
+      <div class="csub">Prom. diario $${fmt(r.promedioDiario)} · ${r.tickets} tickets</div>
+    </div>`;
+  });
+
+  // Stress de liquidez: obtener aging corriente de tesorería si está disponible
+  const agingCorriente = S.tesoreria?.aging?.corriente?.monto ?? 0;
+  const stressActivo = holdingTotal > 0 && agingCorriente > 1.5 * holdingTotal;
+
+  const holdingCard = `<div class="card">
+    <div class="clabel">📈 Holding (neto)</div>
+    <div class="cval ok">$${fmt(holdingTotal)}</div>
+    <div class="csub">${desde} → ${hasta} · ${holdingTickets} tickets</div>
+  </div>`;
+
+  const stressCard = stressActivo ? `<div class="card" style="border-left:3px solid #f59e0b">
+    <div class="clabel">⚠ Stress de Liquidez</div>
+    <div class="cval warn">ACTIVO</div>
+    <div class="csub">Aging $${fmt(agingCorriente)} &gt; 1.5× ingresos $${fmt(holdingTotal)}</div>
+  </div>` : '';
+
+  const otrasCard = `<div class="card"><div class="clabel">⚪ Otras sociedades</div><div class="cval neu">Bloqueado</div><div class="csub">Directiva Restrictiva DBOF-REV</div></div>`;
+
+  document.getElementById('cards-revenue').innerHTML = holdingCard + cards.join('') + otrasCard + stressCard;
 }
 
 // ═══════════════════════════════════════════════
