@@ -505,9 +505,10 @@ async function loadRevenue() {
   const token = document.getElementById('cfg_token')?.value;
   if (!token) { renderRevError('Inicia sesión primero'); return; }
 
-  const c = getConfig();
-  const desde = c.desde || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
-  const hasta = c.hasta || new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const desde = document.getElementById('cfg_desde').value
+    || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+  const hasta = document.getElementById('cfg_hasta').value
+    || new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
   renderRevLoading();
   try {
