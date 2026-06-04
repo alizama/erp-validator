@@ -286,11 +286,39 @@
     <div class="panel" id="panel-revenue">
       <div><div class="ptitle">📈 Control de Revenue</div><div class="psub">Ingresos acumulados del mes · Cireba · Santa Burguesa · Barrio La Boca</div></div>
       <div class="cards" id="cards-revenue">
-        <div class="card"><div class="clabel">Cireba (Buffalo Wings SV)</div><div class="cval neu">—</div><div class="csub">Solo en reporte automático</div></div>
-        <div class="card"><div class="clabel">Santa Burguesa</div><div class="cval neu">—</div><div class="csub">Solo en reporte automático</div></div>
-        <div class="card"><div class="clabel">Inversiones Barrio La Boca</div><div class="cval neu">—</div><div class="csub">Solo en reporte automático</div></div>
-        <div class="card"><div class="clabel">Otras sociedades</div><div class="cval neu">⚪</div><div class="csub">Bloqueado por Directiva Restrictiva</div></div>
+        <div class="card">
+          <div class="clabel">📈 Ingresos holding (neto)</div>
+          <div class="cval ok">$187,432.50</div>
+          <div class="csub">01/06 → 04/06 · 3 empresas</div>
+        </div>
+        <div class="card">
+          <div class="clabel">🟢 Cireba (Buffalo Wings SV)</div>
+          <div class="cval ok">$98,214.75</div>
+          <div class="csub">Prom. diario $24,553.69 · 1,842 tickets</div>
+        </div>
+        <div class="card">
+          <div class="clabel">🟢 Santa Burguesa</div>
+          <div class="cval ok">$54,107.30</div>
+          <div class="csub">Prom. diario $13,526.83 · 963 tickets</div>
+        </div>
+        <div class="card">
+          <div class="clabel">🟢 Inversiones Barrio La Boca</div>
+          <div class="cval ok">$35,110.45</div>
+          <div class="csub">Prom. diario $8,777.61 · 621 tickets</div>
+        </div>
+        <div class="card">
+          <div class="clabel">⚪ Otras sociedades</div>
+          <div class="cval neu">Bloqueado</div>
+          <div class="csub">Directiva Restrictiva DBOF-REV</div>
+        </div>
+        <!-- Stress: solo aparece si aging 0-30 > 1.5× ingresos. Ejemplo con alerta activa -->
+        <div class="card" style="border-left:3px solid #f59e0b">
+          <div class="clabel">⚠ Stress de Liquidez</div>
+          <div class="cval warn">ACTIVO</div>
+          <div class="csub">Aging $185,663 &gt; 1.5× ingresos $187,432</div>
+        </div>
       </div>
+      <div style="font-size:11px;color:#888;padding:4px 12px 8px">⚠ Datos de ejemplo — conexión SICI activa en reporte automático</div>
     </div>
 
     <!-- TESORERÍA -->
