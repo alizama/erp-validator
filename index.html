@@ -1706,8 +1706,26 @@ async function runKardex() {
   }
 }
 
+function esMovimientoInvalidacion(m) {
+  const sub = (m.subtipoMovimiento ?? '').toUpperCase();
+  const tipo = (m.tipoMovimiento ?? '').toUpperCase();
+  // Cubre variantes: INVALIDACION_INGRESO, INVALIDACION, REVERSAL, o salida que referencia un doc de compra
+  return sub.includes('INVAL') || sub === 'REVERSAL' || sub.includes('REVERSAL')
+      || tipo === 'REVERSAL';
+}
+
 function validarPreciosKardex(movimientos) {
   const umbral = (parseFloat(document.getElementById('kx_umbral')?.value) || 10) / 100;
+
+  // Índice de compras por (empresa, productoId, numeroDocumento)
+  // Clave: detectar Invalidaciones que revierten a precio distinto al de la compra original
+  const comprasPorDoc = new Map();
+  for (const m of movimientos) {
+    if (m.subtipoMovimiento === 'COMPRA' && m.costoUnitario > 0 && m.numeroDocumento) {
+      const key = `${m._empresa}_${m.productoId}_${m.numeroDocumento}`;
+      if (!comprasPorDoc.has(key)) comprasPorDoc.set(key, m);
+    }
+  }
 
   const grupos = new Map();
   for (const m of movimientos) {
@@ -1729,11 +1747,32 @@ function validarPreciosKardex(movimientos) {
       if (m.tipoMovimiento === 'SALDO_INICIAL') continue;
       const costo    = m.costoUnitario;
       const esCompra = m.subtipoMovimiento === 'COMPRA';
+      const esInval  = esMovimientoInvalidacion(m);
 
+      // Regla 1: costo cero/nulo — error absoluto en cualquier movimiento
       if (costo == null || costo === 0) {
         anomalias.push({ ...m, _precioRef: precioPromCompras, _desvPct: null, _tipo_alerta: 'COSTO_CERO' });
         continue;
       }
+
+      // Regla 2 (caso principal): Invalidación revierte a precio diferente al de la Compra original
+      // Ej: Compra Doc 4420 @ $2.7598 → Invalidación Doc 4420 @ $2.7673 → ERROR
+      if (esInval && m.numeroDocumento) {
+        const docKey = `${m._empresa}_${m.productoId}_${m.numeroDocumento}`;
+        const compraOrig = comprasPorDoc.get(docKey);
+        if (compraOrig && Math.abs(costo - compraOrig.costoUnitario) > 0.001) {
+          const desv = Math.abs(costo - compraOrig.costoUnitario) / compraOrig.costoUnitario;
+          anomalias.push({ ...m,
+            _precioRef: compraOrig.costoUnitario,
+            _delta: costo - compraOrig.costoUnitario,
+            _desvPct: (desv * 100).toFixed(2),
+            _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
+            _compraOrig: compraOrig,
+          });
+        }
+      }
+
+      // Regla 3: Compra con precio atípico vs. promedio del período (alerta de revisión)
       if (esCompra && precioPromCompras != null && compras.length > 1) {
         const desv = Math.abs(costo - precioPromCompras) / precioPromCompras;
         if (desv > umbral) {
@@ -1752,15 +1791,17 @@ function validarPreciosKardex(movimientos) {
 
 function renderKardex({ total, grupos, anomalias }) {
   const fmt2 = n => (+(n||0)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const ceroCount  = anomalias.filter(a => a._tipo_alerta === 'COSTO_CERO').length;
+  const ceroCount   = anomalias.filter(a => a._tipo_alerta === 'COSTO_CERO').length;
+  const invalCount  = anomalias.filter(a => a._tipo_alerta === 'INVALIDACION_PRECIO_INCORRECTO').length;
   const atipicoCount = anomalias.filter(a => a._tipo_alerta === 'COMPRA_PRECIO_ATIPICO').length;
-  const semaforo = ceroCount > 0 ? 'ROJO' : atipicoCount > 0 ? 'AMARILLO' : 'VERDE';
+  const semaforo = (ceroCount > 0 || invalCount > 0) ? 'ROJO' : atipicoCount > 0 ? 'AMARILLO' : 'VERDE';
   const SEMI = { VERDE:'🟢', AMARILLO:'🟡', ROJO:'🔴' };
   const COL  = { VERDE:'var(--accent)', AMARILLO:'var(--warn)', ROJO:'var(--danger)' };
 
   // Actualizar badge nav
   const badge = document.getElementById('b-kardex');
-  if (anomalias.length > 0) { badge.textContent = anomalias.length; badge.style.display = ''; }
+  const badgeN = ceroCount + invalCount + atipicoCount;
+  if (badgeN > 0) { badge.textContent = badgeN; badge.style.display = ''; }
   else { badge.style.display = 'none'; }
 
   // Cards
@@ -1771,16 +1812,15 @@ function renderKardex({ total, grupos, anomalias }) {
     <div class="card"><div class="clabel">Total movimientos</div>
       <div class="cval">${total.toLocaleString()}</div>
       <div class="csub">${grupos} productos únicos auditados</div></div>
-    <div class="card"><div class="clabel">Precio atípico en compra</div>
+    <div class="card"><div class="clabel">Invalidación precio incorrecto</div>
+      <div class="cval" style="color:${invalCount>0?'var(--danger)':'var(--accent)'}">${invalCount}</div>
+      <div class="csub">Reversa a precio ≠ compra original</div></div>
+    <div class="card"><div class="clabel">Compra precio atípico</div>
       <div class="cval" style="color:${atipicoCount>0?'var(--warn)':'var(--accent)'}">${atipicoCount}</div>
-      <div class="csub">Desviación > ${document.getElementById('kx_umbral').value}% del promedio del período</div></div>
+      <div class="csub">Desviación > ${document.getElementById('kx_umbral').value}% del promedio</div></div>
     <div class="card"><div class="clabel">Costo cero / nulo</div>
       <div class="cval" style="color:${ceroCount>0?'var(--danger)':'var(--accent)'}">${ceroCount}</div>
       <div class="csub">Movimientos sin precio registrado</div></div>
-    <div class="card"><div class="clabel">% Cumplimiento</div>
-      <div class="cval" style="color:${semaforo==='VERDE'?'var(--accent)':'var(--warn)'}">
-        ${total > 0 ? (((total - anomalias.length) / total) * 100).toFixed(1) : '—'}%</div>
-      <div class="csub">${anomalias.length} anomalía(s) de ${total}</div></div>
   `;
 
   // Tabla
@@ -1795,8 +1835,9 @@ function renderKardex({ total, grupos, anomalias }) {
 function renderKardexRows(rows) {
   const fmt2 = n => n != null ? '$' + (+(n)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
   const ALERTA_LABEL = {
-    COSTO_CERO:           '<span class="tag terr">COSTO CERO</span>',
-    COMPRA_PRECIO_ATIPICO:'<span class="tag twrn">PRECIO ATÍPICO</span>',
+    COSTO_CERO:                    '<span class="tag terr">COSTO CERO</span>',
+    INVALIDACION_PRECIO_INCORRECTO:'<span class="tag terr">INVAL. PRECIO ≠ OC</span>',
+    COMPRA_PRECIO_ATIPICO:         '<span class="tag twrn">PRECIO ATÍPICO</span>',
   };
 
   if (rows.length === 0) {
