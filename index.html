@@ -1701,6 +1701,20 @@ async function runKardex() {
     }
 
     _kxAllMovimientos = todosMovimientos;
+
+    // DEBUG — ver qué valores reales tiene subtipoMovimiento
+    const subtiposUnicos = [...new Set(todosMovimientos.map(m => m.subtipoMovimiento ?? '(null)'))].sort();
+    log(`  DEBUG subtipoMovimiento únicos: ${subtiposUnicos.join(' | ')}`, 'inf');
+    const anulaciones = todosMovimientos.filter(m => {
+      const s = (m.subtipoMovimiento ?? '').toUpperCase();
+      return s.includes('ANULAC') || s.includes('INVALID') || s.includes('REVERS');
+    });
+    log(`  DEBUG candidatos invalidación: ${anulaciones.length} movs`, anulaciones.length > 0 ? 'ok' : 'warn');
+    if (anulaciones.length > 0) {
+      const s = anulaciones[0];
+      log(`  DEBUG sample: sub=${s.subtipoMovimiento} costo=${s.costoUnitario} doc=${s.numeroDocumento ?? s.nroDocumento ?? s.numDoc ?? '?'} prodId=${s._productoId}`, 'inf');
+    }
+
     const resultado = validarPreciosKardex(todosMovimientos);
     renderKardex(resultado);
     document.getElementById('kx-pb').style.width = '100%';
