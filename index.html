@@ -1638,7 +1638,14 @@ let _kxAllMovimientos = [];
 async function fetchKardexConsolidado(c) {
   let all = [], page = 1, totalPags = 1;
   while (page <= totalPags) {
-    const p = { alcance: 'todas_ubicaciones', desde: c.desde, hasta: c.hasta, page, pageSize: 200 };
+    const p = {
+      alcance: 'todas_ubicaciones',
+      desde: c.desde,
+      hasta: c.hasta,
+      desglosarPorProducto: true,   // una fila por producto — necesario para ver productoId/nombreProducto
+      page,
+      pageSize: 200,
+    };
     const raw = await apiGet('/BodegaDistribucion/kardex/consolidado', p, c);
     const movs = raw?.movimientos ?? [];
     all = all.concat(movs);
@@ -1646,7 +1653,7 @@ async function fetchKardexConsolidado(c) {
     if (movs.length === 0) break;
     page++;
   }
-  log(`  Kardex consolidado empresa ${c.idcompany}: ${all.length} movimientos`, 'ok');
+  log(`  Kardex consolidado empresa ${c.idcompany}: ${all.length} líneas (desglosado)`, 'ok');
   return all;
 }
 
@@ -1803,8 +1810,9 @@ function renderKardexRows(rows) {
       ? 'background:rgba(255,61,90,.06)'
       : 'background:rgba(255,184,0,.05)';
     const fecha = (m.fechaMovimiento ?? '').slice(0,10);
+    const movId = m.movimientoId ?? m.id;
     const verOCBtn = m.subtipoMovimiento === 'COMPRA'
-      ? `<button class="btn btn-g btn-sm" onclick="verDetalleCompra(${m.id})" style="padding:2px 7px;font-size:10px">Ver OC</button>`
+      ? `<button class="btn btn-g btn-sm" onclick="verDetalleCompra(${movId})" style="padding:2px 7px;font-size:10px">Ver OC</button>`
       : '';
     return `<tr style="${bgColor}">
       <td>${m._empresaNombre}</td>
