@@ -1641,7 +1641,6 @@ async function fetchKardexConsolidado(c) {
       alcance: 'todas_ubicaciones',
       desde: c.desde,
       hasta: c.hasta,
-      desglosarPorProducto: true,   // una fila por producto — necesario para ver productoId/nombreProducto
       page,
       pageSize: 200,
     };
@@ -1652,7 +1651,10 @@ async function fetchKardexConsolidado(c) {
     if (movs.length === 0) break;
     page++;
   }
-  log(`  Kardex consolidado empresa ${c.idcompany}: ${all.length} líneas (desglosado)`, 'ok');
+  if (all.length > 0) {
+    const campos = Object.keys(all[0]).join(', ');
+    log(`  Kardex empresa ${c.idcompany}: ${all.length} movs — campos: ${campos}`, 'inf');
+  }
   return all;
 }
 
@@ -1681,14 +1683,20 @@ async function runKardex() {
       try {
         const c = { ...cfg(), idcompany: empId, desde, hasta };
         const movs = await fetchKardexConsolidado(c);
-        movs.forEach(m => { m._empresa = empId; m._empresaNombre = COMPANY_NAMES[empId] ?? empId; });
+        movs.forEach(m => {
+          m._empresa      = empId;
+          m._empresaNombre = COMPANY_NAMES[empId] ?? empId;
+          // Normalizar campos de producto (el API puede usar distintos nombres)
+          m._productoId   = m.productoId   ?? m.idProducto  ?? m.productId  ?? null;
+          m._productoNombre = m.nombreProducto ?? m.producto ?? m.nombre ?? m.productName ?? null;
+        });
         todosMovimientos = todosMovimientos.concat(movs);
       } catch(e) { log(`  ⚠ Empresa ${empId}: ${e.message}`, 'warn'); }
     }
 
     if (filtroProd) {
       todosMovimientos = todosMovimientos.filter(m =>
-        (m.nombreProducto ?? '').toLowerCase().includes(filtroProd)
+        (m._productoNombre ?? '').toLowerCase().includes(filtroProd)
       );
     }
 
@@ -1718,14 +1726,14 @@ function validarPreciosKardex(movimientos) {
     const esOrigen = m.subtipoMovimiento === 'COMPRA'
                   || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA';
     if (esOrigen && m.costoUnitario > 0 && m.numeroDocumento) {
-      const key = `${m._empresa}_${m.productoId}_${m.numeroDocumento}`;
+      const key = `${m._empresa}_${m._productoId}_${m.numeroDocumento}`;
       if (!comprasPorDoc.has(key)) comprasPorDoc.set(key, m);
     }
   }
 
   const grupos = new Map();
   for (const m of movimientos) {
-    const key = `${m._empresa}_${m.productoId}`;
+    const key = `${m._empresa}_${m._productoId}`;
     if (!grupos.has(key)) grupos.set(key, []);
     grupos.get(key).push(m);
   }
@@ -1831,7 +1839,7 @@ function renderKardexRows(rows) {
       : '';
     return `<tr style="${bgColor}">
       <td>${m._empresaNombre}</td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${m.nombreProducto??''}">${m.nombreProducto??'—'}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${m._productoNombre??''}">${m._productoNombre??'—'}</td>
       <td style="font-size:10px;color:var(--muted)">${m.ubicacionConsultaNombre??m.ubicacionOrigenNombre??'—'}</td>
       <td>${fecha}</td>
       <td><span class="tag tinf">${m.subtipoMovimiento??m.tipoMovimiento??'—'}</span></td>
@@ -1892,7 +1900,7 @@ function exportKardexCSV() {
   const header = 'Empresa,Producto,Bodega,Fecha,Subtipo,N° Doc,Costo Registrado,Prom. Compras,Δ%,Alerta';
   const fmt2 = n => n != null ? n.toFixed(2) : '';
   const lines = rows.map(m => [
-    m._empresaNombre, m.nombreProducto??'',
+    m._empresaNombre, m._productoNombre??'',
     m.ubicacionConsultaNombre??m.ubicacionOrigenNombre??'',
     (m.fechaMovimiento??'').slice(0,10),
     m.subtipoMovimiento??m.tipoMovimiento??'',
