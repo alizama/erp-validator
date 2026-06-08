@@ -1712,7 +1712,17 @@ async function runKardex() {
     log(`  DEBUG candidatos invalidación: ${anulaciones.length} movs`, anulaciones.length > 0 ? 'ok' : 'warn');
     if (anulaciones.length > 0) {
       const s = anulaciones[0];
-      log(`  DEBUG sample: sub=${s.subtipoMovimiento} costo=${s.costoUnitario} doc=${s.numeroDocumento ?? s.nroDocumento ?? s.numDoc ?? '?'} prodId=${s._productoId}`, 'inf');
+      log(`  DEBUG sample: sub=${s.subtipoMovimiento} costo=${s.costoUnitario} doc=${s.numeroDocumento} docRef=${s.documentoReferencia} (tipo ${typeof s.documentoReferencia}) id=${s.id} prodId=${s._productoId}`, 'inf');
+      // ¿documentoReferencia coincide con algún m.id?
+      const matchExacto = todosMovimientos.find(m => m.id === s.documentoReferencia);
+      const matchStr    = todosMovimientos.find(m => String(m.id) === String(s.documentoReferencia));
+      log(`  DEBUG docRef→id: exacto=${matchExacto ? 'SI' : 'NO'} | string=${matchStr ? 'SI' : 'NO'}`, 'inf');
+      // ¿Cuántas compras tienen el mismo empresa+doc?
+      const fallback = todosMovimientos.filter(m =>
+        m._empresa === s._empresa && m.numeroDocumento === s.numeroDocumento &&
+        (m.subtipoMovimiento === 'COMPRA' || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA')
+      );
+      log(`  DEBUG fallback empresa+doc candidatos: ${fallback.length}`, 'inf');
     }
 
     const resultado = validarPreciosKardex(todosMovimientos);
