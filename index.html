@@ -1707,21 +1707,21 @@ async function runKardex() {
 }
 
 function esMovimientoInvalidacion(m) {
-  const sub = (m.subtipoMovimiento ?? '').toUpperCase();
-  const tipo = (m.tipoMovimiento ?? '').toUpperCase();
-  // Cubre variantes: INVALIDACION_INGRESO, INVALIDACION, REVERSAL, o salida que referencia un doc de compra
-  return sub.includes('INVAL') || sub === 'REVERSAL' || sub.includes('REVERSAL')
-      || tipo === 'REVERSAL';
+  const sub = m.subtipoMovimiento ?? '';
+  return sub === 'ANULACION_INGRESO_COMPRA'       // reversa de compra → tipoMovimiento: SALIDA
+      || sub === 'ANULACION_NOTA_CREDITO_COMPRA'; // reversa de nota de crédito → tipoMovimiento: ENTRADA
 }
 
 function validarPreciosKardex(movimientos) {
   const umbral = (parseFloat(document.getElementById('kx_umbral')?.value) || 10) / 100;
 
-  // Índice de compras por (empresa, productoId, numeroDocumento)
-  // Clave: detectar Invalidaciones que revierten a precio distinto al de la compra original
+  // Índice de compras y notas de crédito por (empresa, productoId, numeroDocumento)
+  // Permite detectar anulaciones que revierten a precio distinto al del movimiento original
   const comprasPorDoc = new Map();
   for (const m of movimientos) {
-    if (m.subtipoMovimiento === 'COMPRA' && m.costoUnitario > 0 && m.numeroDocumento) {
+    const esOrigen = m.subtipoMovimiento === 'COMPRA'
+                  || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA';
+    if (esOrigen && m.costoUnitario > 0 && m.numeroDocumento) {
       const key = `${m._empresa}_${m.productoId}_${m.numeroDocumento}`;
       if (!comprasPorDoc.has(key)) comprasPorDoc.set(key, m);
     }
