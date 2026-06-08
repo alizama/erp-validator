@@ -98,6 +98,7 @@
     <div class="ni" onclick="sp('compras')" id="nav-compras"><span class="ni-icon">🧾</span> Compras<span class="nbadge" id="b-compras" style="display:none"></span></div>
     <div class="ni" onclick="sp('tesoreria')" id="nav-tesoreria"><span class="ni-icon">💰</span> Tesorería<span class="nbadge" id="b-tesoreria" style="display:none"></span></div>
     <div class="ni" onclick="sp('revenue')" id="nav-revenue"><span class="ni-icon">📈</span> Revenue</div>
+    <div class="ni" onclick="sp('kardex')" id="nav-kardex"><span class="ni-icon">📦</span> Kardex<span class="nbadge" id="b-kardex" style="display:none"></span></div>
     <div class="slabel">Sistema</div>
     <div class="ni" onclick="sp('log')"><span class="ni-icon">🖥️</span> Log</div>
   </nav>
@@ -291,6 +292,75 @@
       </div>
     </div>
 
+    <!-- KARDEX -->
+    <div class="panel" id="panel-kardex">
+      <div><div class="ptitle">📦 Validador Kardex</div><div class="psub">Consistencia de precios · Promedio ponderado · Todas las bodegas</div></div>
+
+      <div class="box">
+        <h3>🔍 Filtros</h3>
+        <div class="fr">
+          <div class="fg">
+            <label>Empresa</label>
+            <select id="kx_company" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:6px 9px;color:var(--text);font-family:var(--mono);font-size:11px;width:100%">
+              <option value="0">0 — Todas (Holding)</option>
+              <option value="2">2 — Santa Burguesa</option>
+              <option value="3">3 — Inversiones Barrio La Boca</option>
+              <option value="4">4 — Dreamvesting</option>
+              <option value="5">5 — Mejia Mendez</option>
+              <option value="6">6 — Inversiones Las Iguanas</option>
+              <option value="7">7 — Proyectos Alimenticios Internacionales</option>
+              <option value="8">8 — Central and Caribbean Coffee SV</option>
+              <option value="25" selected>25 — Cireba</option>
+            </select>
+          </div>
+          <div class="fg"><label>Fecha inicio</label><input type="date" id="kx_desde"></div>
+          <div class="fg"><label>Fecha fin</label><input type="date" id="kx_hasta"></div>
+          <div class="fg"><label>Producto (opcional)</label><input type="text" id="kx_producto" placeholder="Filtrar por nombre..."></div>
+          <div class="fg"><label>Umbral desviación %</label><input type="number" id="kx_umbral" value="10" min="1" max="100" style="width:70px"><span style="font-size:10px;color:var(--muted);margin-left:4px">% para alertar precio atípico en compras</span></div>
+        </div>
+        <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+          <button class="btn btn-g" id="btnKardex" onclick="runKardex()">▶ Validar Kardex</button>
+          <div class="pw" style="flex:1"><div class="pb" id="kx-pb" style="width:0%"></div></div>
+          <span id="kx-status" style="font-family:var(--mono);font-size:10px;color:var(--muted)"></span>
+        </div>
+      </div>
+
+      <div class="cards" id="cards-kardex"><div class="empty"><div class="big">📦</div><div>Ejecuta la validación primero</div></div></div>
+
+      <div class="rh" id="kx-table-header" style="display:none">
+        <h3 id="kx-title">Anomalías detectadas</h3>
+        <div style="display:flex;gap:7px;align-items:center">
+          <select id="kx_filtro" onchange="filtrarKardex()" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:5px 8px;color:var(--text);font-family:var(--mono);font-size:11px">
+            <option value="anomalias">Solo anomalías</option>
+            <option value="todos">Ver todos</option>
+          </select>
+          <button class="btn btn-g btn-sm" onclick="exportKardexCSV()">⬇ CSV</button>
+        </div>
+      </div>
+
+      <div class="tw" id="kx-table-wrap" style="display:none">
+        <table>
+          <thead><tr>
+            <th>Empresa</th><th>Producto</th><th>Bodega</th><th>Fecha</th>
+            <th>Subtipo</th><th>N° Doc</th>
+            <th>Costo Registrado</th><th>Prom. Compras</th><th>Δ%</th><th>Alerta</th>
+          </tr></thead>
+          <tbody id="tb-kardex"><tr><td colspan="10"><div class="empty">Sin datos</div></td></tr></tbody>
+        </table>
+      </div>
+
+      <!-- Modal detalle compra -->
+      <div id="kx-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);z-index:999;align-items:center;justify-content:center">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h3 style="font-size:13px">📋 Origen de Compra</h3>
+            <button onclick="document.getElementById('kx-modal').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px">✕</button>
+          </div>
+          <div id="kx-modal-content" style="font-family:var(--mono);font-size:11px;line-height:1.7"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- TESORERÍA -->
     <div class="panel" id="panel-tesoreria">
       <div><div class="ptitle">💰 Tesorería</div><div class="psub">Pagos ejecutados · Saldos bancarios · Aging CxP (DBOF — desde 2026-06-01)</div></div>
@@ -446,10 +516,12 @@ const GRAN_CONTRIBUYENTES = new Set(['25']); // Cireba — no aplica percepción
 
 window.addEventListener('DOMContentLoaded', () => {
   const now = new Date();
-  document.getElementById('cfg_desde').value =
-    new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  document.getElementById('cfg_hasta').value =
-    new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const primerDiaMes = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+  const ayer = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  document.getElementById('cfg_desde').value = primerDiaMes;
+  document.getElementById('cfg_hasta').value = ayer;
+  document.getElementById('kx_desde').value  = primerDiaMes;
+  document.getElementById('kx_hasta').value  = ayer;
   initMsal(); onCompanySel();
 });
 
@@ -1549,6 +1621,266 @@ function renderTesoreria(t) {
         <td style="color:var(--danger)">${item.dias} días</td></tr>`
     ).join('');
   } else { critSec.style.display = 'none'; }
+}
+
+// ═══════════════════════════════════════════════
+// KARDEX VALIDATOR
+// ═══════════════════════════════════════════════
+
+const COMPANY_NAMES = {
+  '2':'Santa Burguesa','3':'Inv. Barrio La Boca','4':'Dreamvesting',
+  '5':'Mejia Mendez','6':'Inv. Las Iguanas','7':'PROYALIM',
+  '8':'C&C Coffee','25':'Cireba'
+};
+
+let _kxAllMovimientos = [];
+
+async function fetchKardexConsolidado(c) {
+  let all = [], page = 1, totalPags = 1;
+  while (page <= totalPags) {
+    const p = { alcance: 'todas_ubicaciones', desde: c.desde, hasta: c.hasta, page, pageSize: 200 };
+    const raw = await apiGet('/BodegaDistribucion/kardex/consolidado', p, c);
+    const movs = raw?.movimientos ?? [];
+    all = all.concat(movs);
+    totalPags = raw?.totalPaginas ?? 1;
+    if (movs.length === 0) break;
+    page++;
+  }
+  log(`  Kardex consolidado empresa ${c.idcompany}: ${all.length} movimientos`, 'ok');
+  return all;
+}
+
+async function runKardex() {
+  const btn = document.getElementById('btnKardex');
+  btn.disabled = true;
+  document.getElementById('kx-status').textContent = 'Cargando...';
+  document.getElementById('kx-pb').style.width = '0%';
+
+  try {
+    const companyId = document.getElementById('kx_company').value;
+    const desde     = document.getElementById('kx_desde').value;
+    const hasta     = document.getElementById('kx_hasta').value;
+    const filtroProd = document.getElementById('kx_producto').value.toLowerCase().trim();
+
+    if (!desde || !hasta) { alert('Selecciona fechas'); return; }
+
+    const TODAS = ['2','3','4','5','6','7','8','25'];
+    const empresas = companyId === '0' ? TODAS : [companyId];
+    let todosMovimientos = [];
+
+    for (let i = 0; i < empresas.length; i++) {
+      const empId = empresas[i];
+      document.getElementById('kx-status').textContent = `Empresa ${empId}...`;
+      document.getElementById('kx-pb').style.width = `${Math.round((i / empresas.length) * 90)}%`;
+      try {
+        const c = { ...cfg(), idcompany: empId, desde, hasta };
+        const movs = await fetchKardexConsolidado(c);
+        movs.forEach(m => { m._empresa = empId; m._empresaNombre = COMPANY_NAMES[empId] ?? empId; });
+        todosMovimientos = todosMovimientos.concat(movs);
+      } catch(e) { log(`  ⚠ Empresa ${empId}: ${e.message}`, 'warn'); }
+    }
+
+    if (filtroProd) {
+      todosMovimientos = todosMovimientos.filter(m =>
+        (m.nombreProducto ?? '').toLowerCase().includes(filtroProd)
+      );
+    }
+
+    _kxAllMovimientos = todosMovimientos;
+    const resultado = validarPreciosKardex(todosMovimientos);
+    renderKardex(resultado);
+    document.getElementById('kx-pb').style.width = '100%';
+    document.getElementById('kx-status').textContent = `${todosMovimientos.length} movimientos procesados`;
+  } catch(e) {
+    log(`[Kardex] Error: ${e.message}`, 'err');
+    document.getElementById('kx-status').textContent = 'Error — ver Log';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function validarPreciosKardex(movimientos) {
+  const umbral = (parseFloat(document.getElementById('kx_umbral')?.value) || 10) / 100;
+
+  const grupos = new Map();
+  for (const m of movimientos) {
+    const key = `${m._empresa}_${m.productoId}`;
+    if (!grupos.has(key)) grupos.set(key, []);
+    grupos.get(key).push(m);
+  }
+
+  const anomalias = [];
+  for (const [, movs] of grupos) {
+    const compras = movs.filter(m =>
+      m.subtipoMovimiento === 'COMPRA' && m.costoUnitario != null && m.costoUnitario > 0
+    );
+    const precioPromCompras = compras.length > 0
+      ? compras.reduce((s, m) => s + m.costoUnitario, 0) / compras.length
+      : null;
+
+    for (const m of movs) {
+      if (m.tipoMovimiento === 'SALDO_INICIAL') continue;
+      const costo    = m.costoUnitario;
+      const esCompra = m.subtipoMovimiento === 'COMPRA';
+
+      if (costo == null || costo === 0) {
+        anomalias.push({ ...m, _precioRef: precioPromCompras, _desvPct: null, _tipo_alerta: 'COSTO_CERO' });
+        continue;
+      }
+      if (esCompra && precioPromCompras != null && compras.length > 1) {
+        const desv = Math.abs(costo - precioPromCompras) / precioPromCompras;
+        if (desv > umbral) {
+          anomalias.push({ ...m, _precioRef: precioPromCompras,
+            _delta: costo - precioPromCompras,
+            _desvPct: (desv * 100).toFixed(1),
+            _tipo_alerta: 'COMPRA_PRECIO_ATIPICO',
+          });
+        }
+      }
+    }
+  }
+
+  return { total: movimientos.length, grupos: grupos.size, anomalias };
+}
+
+function renderKardex({ total, grupos, anomalias }) {
+  const fmt2 = n => (+(n||0)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const ceroCount  = anomalias.filter(a => a._tipo_alerta === 'COSTO_CERO').length;
+  const atipicoCount = anomalias.filter(a => a._tipo_alerta === 'COMPRA_PRECIO_ATIPICO').length;
+  const semaforo = ceroCount > 0 ? 'ROJO' : atipicoCount > 0 ? 'AMARILLO' : 'VERDE';
+  const SEMI = { VERDE:'🟢', AMARILLO:'🟡', ROJO:'🔴' };
+  const COL  = { VERDE:'var(--accent)', AMARILLO:'var(--warn)', ROJO:'var(--danger)' };
+
+  // Actualizar badge nav
+  const badge = document.getElementById('b-kardex');
+  if (anomalias.length > 0) { badge.textContent = anomalias.length; badge.style.display = ''; }
+  else { badge.style.display = 'none'; }
+
+  // Cards
+  document.getElementById('cards-kardex').innerHTML = `
+    <div class="card"><div class="clabel">Semáforo</div>
+      <div class="cval" style="color:${COL[semaforo]};font-size:22px">${SEMI[semaforo]} ${semaforo}</div>
+      <div class="csub">${total.toLocaleString()} movimientos · ${grupos} productos</div></div>
+    <div class="card"><div class="clabel">Total movimientos</div>
+      <div class="cval">${total.toLocaleString()}</div>
+      <div class="csub">${grupos} productos únicos auditados</div></div>
+    <div class="card"><div class="clabel">Precio atípico en compra</div>
+      <div class="cval" style="color:${atipicoCount>0?'var(--warn)':'var(--accent)'}">${atipicoCount}</div>
+      <div class="csub">Desviación > ${document.getElementById('kx_umbral').value}% del promedio del período</div></div>
+    <div class="card"><div class="clabel">Costo cero / nulo</div>
+      <div class="cval" style="color:${ceroCount>0?'var(--danger)':'var(--accent)'}">${ceroCount}</div>
+      <div class="csub">Movimientos sin precio registrado</div></div>
+    <div class="card"><div class="clabel">% Cumplimiento</div>
+      <div class="cval" style="color:${semaforo==='VERDE'?'var(--accent)':'var(--warn)'}">
+        ${total > 0 ? (((total - anomalias.length) / total) * 100).toFixed(1) : '—'}%</div>
+      <div class="csub">${anomalias.length} anomalía(s) de ${total}</div></div>
+  `;
+
+  // Tabla
+  document.getElementById('kx-table-header').style.display = '';
+  document.getElementById('kx-table-wrap').style.display   = '';
+  document.getElementById('kx-title').textContent =
+    anomalias.length > 0 ? `Anomalías detectadas (${anomalias.length})` : '✅ Sin anomalías';
+
+  renderKardexRows(anomalias);
+}
+
+function renderKardexRows(rows) {
+  const fmt2 = n => n != null ? '$' + (+(n)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  const ALERTA_LABEL = {
+    COSTO_CERO:           '<span class="tag terr">COSTO CERO</span>',
+    COMPRA_PRECIO_ATIPICO:'<span class="tag twrn">PRECIO ATÍPICO</span>',
+  };
+
+  if (rows.length === 0) {
+    document.getElementById('tb-kardex').innerHTML =
+      '<tr><td colspan="10"><div class="empty">✅ Sin anomalías en el rango seleccionado</div></td></tr>';
+    return;
+  }
+
+  document.getElementById('tb-kardex').innerHTML = rows.map(m => {
+    const bgColor = m._tipo_alerta === 'COSTO_CERO'
+      ? 'background:rgba(255,61,90,.06)'
+      : 'background:rgba(255,184,0,.05)';
+    const fecha = (m.fechaMovimiento ?? '').slice(0,10);
+    const verOCBtn = m.subtipoMovimiento === 'COMPRA'
+      ? `<button class="btn btn-g btn-sm" onclick="verDetalleCompra(${m.id})" style="padding:2px 7px;font-size:10px">Ver OC</button>`
+      : '';
+    return `<tr style="${bgColor}">
+      <td>${m._empresaNombre}</td>
+      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${m.nombreProducto??''}">${m.nombreProducto??'—'}</td>
+      <td style="font-size:10px;color:var(--muted)">${m.ubicacionConsultaNombre??m.ubicacionOrigenNombre??'—'}</td>
+      <td>${fecha}</td>
+      <td><span class="tag tinf">${m.subtipoMovimiento??m.tipoMovimiento??'—'}</span></td>
+      <td style="font-family:var(--mono);font-size:10px">${m.numeroDocumento??'—'}</td>
+      <td style="font-family:var(--mono)">${fmt2(m.costoUnitario)}</td>
+      <td style="font-family:var(--mono);color:var(--muted)">${fmt2(m._precioRef)}</td>
+      <td style="font-family:var(--mono);color:${m._delta>0?'var(--danger)':'var(--warn)'}">
+        ${m._desvPct != null ? (m._delta > 0 ? '+' : '') + m._desvPct + '%' : '—'}</td>
+      <td>${ALERTA_LABEL[m._tipo_alerta]??''} ${verOCBtn}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filtrarKardex() {
+  const filtro = document.getElementById('kx_filtro').value;
+  const { anomalias } = validarPreciosKardex(_kxAllMovimientos);
+  if (filtro === 'todos') {
+    renderKardexRows(_kxAllMovimientos);
+  } else {
+    renderKardexRows(anomalias);
+  }
+}
+
+async function verDetalleCompra(movimientoId) {
+  const modal   = document.getElementById('kx-modal');
+  const content = document.getElementById('kx-modal-content');
+  modal.style.display = 'flex';
+  content.innerHTML = '<span style="color:var(--muted)">Cargando...</span>';
+  try {
+    const c = cfg();
+    const raw = await apiGet(`/BodegaDistribucion/kardex/movimiento/${movimientoId}/detalle-compra`, {}, c);
+    const mov = raw?.movimientoKardex ?? {};
+    const oc  = raw?.ordenDeCompraIngreso ?? {};
+    const ocBase = raw?.ordenDeCompra ?? {};
+    const fmt2 = n => n != null ? '$' + (+(n)).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+    content.innerHTML = `
+      <div style="display:grid;gap:5px">
+        <div><span style="color:var(--muted)">Movimiento Kardex:</span> #${mov.id??movimientoId}</div>
+        <div><span style="color:var(--muted)">Producto:</span> ${mov.nombreProducto??'—'}</div>
+        <div><span style="color:var(--muted)">Costo U. en Kardex:</span> <b style="color:var(--accent)">${fmt2(mov.costoUnitario)}</b></div>
+        <hr style="border-color:var(--border);margin:6px 0">
+        <div><span style="color:var(--muted)">N° Ingreso:</span> ${oc.numeroDocumento??'—'}</div>
+        <div><span style="color:var(--muted)">Proveedor:</span> ${oc.proveedor??ocBase.proveedor??'—'}</div>
+        <div><span style="color:var(--muted)">Precio U. en OC:</span> <b style="color:var(--warn)">${fmt2(oc.costoUnitario??ocBase.precioUnitario)}</b></div>
+        <div><span style="color:var(--muted)">Fecha ingreso:</span> ${(oc.fecha??'').slice(0,10)||'—'}</div>
+        <div><span style="color:var(--muted)">N° OC base:</span> ${ocBase.numero??ocBase.id??'—'}</div>
+      </div>`;
+  } catch(e) {
+    content.innerHTML = `<span style="color:var(--danger)">Error: ${e.message}</span>`;
+  }
+}
+
+function exportKardexCSV() {
+  const { anomalias } = validarPreciosKardex(_kxAllMovimientos);
+  const rows = document.getElementById('kx_filtro').value === 'todos'
+    ? _kxAllMovimientos : anomalias;
+  if (!rows.length) return;
+  const header = 'Empresa,Producto,Bodega,Fecha,Subtipo,N° Doc,Costo Registrado,Prom. Compras,Δ%,Alerta';
+  const fmt2 = n => n != null ? n.toFixed(2) : '';
+  const lines = rows.map(m => [
+    m._empresaNombre, m.nombreProducto??'',
+    m.ubicacionConsultaNombre??m.ubicacionOrigenNombre??'',
+    (m.fechaMovimiento??'').slice(0,10),
+    m.subtipoMovimiento??m.tipoMovimiento??'',
+    m.numeroDocumento??'',
+    fmt2(m.costoUnitario), fmt2(m._precioRef),
+    m._desvPct??'', m._tipo_alerta??''
+  ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
+  const blob = new Blob([header+'\n'+lines.join('\n')],{type:'text/csv'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `kardex-${document.getElementById('kx_desde').value}_${document.getElementById('kx_hasta').value}.csv`;
+  a.click();
 }
 
 function onCompanySel() {
