@@ -1734,56 +1734,66 @@ function esMovimientoInvalidacion(m) {
 }
 
 function validarPreciosKardex(movimientos) {
-  // Índice de compras y notas de crédito por (empresa, productoId, numeroDocumento)
+  // Índice 1: todos los movimientos por su id (para lookup vía documentoReferencia)
+  const movsPorId = new Map();
+  for (const m of movimientos) {
+    if (m.id != null) movsPorId.set(m.id, m);
+  }
+
+  // Índice 2: compras/NC por empresa+numeroDocumento — sin productoId porque
+  // las anulaciones devuelven productoId=0 y rompen el matching por ese campo
   const comprasPorDoc = new Map();
   for (const m of movimientos) {
     const esOrigen = m.subtipoMovimiento === 'COMPRA'
                   || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA';
     if (esOrigen && m.costoUnitario > 0 && m.numeroDocumento) {
-      const key = `${m._empresa}_${m._productoId}_${m.numeroDocumento}`;
-      if (!comprasPorDoc.has(key)) comprasPorDoc.set(key, m);
+      const key = `${m._empresa}_${m.numeroDocumento}`;
+      if (!comprasPorDoc.has(key)) comprasPorDoc.set(key, []);
+      comprasPorDoc.get(key).push(m);
     }
   }
 
-  const grupos = new Map();
-  for (const m of movimientos) {
-    const key = `${m._empresa}_${m._productoId}`;
-    if (!grupos.has(key)) grupos.set(key, []);
-    grupos.get(key).push(m);
-  }
-
+  const productosUnicos = new Set(movimientos.map(m => `${m._empresa}_${m._productoId}`)).size;
   const anomalias = [];
-  for (const [, movs] of grupos) {
-    for (const m of movs) {
-      if (m.tipoMovimiento === 'SALDO_INICIAL') continue;
-      const costo   = m.costoUnitario;
-      const esInval = esMovimientoInvalidacion(m);
 
-      // Regla 1: costo cero/nulo en cualquier movimiento
-      if (costo == null || costo === 0) {
+  for (const m of movimientos) {
+    if (m.subtipoMovimiento === 'SALDO_INICIAL' || m.tipoMovimiento === 'SALDO_INICIAL') continue;
+    const costo   = m.costoUnitario;
+    const esInval = esMovimientoInvalidacion(m);
+
+    // Regla 1: costo cero/nulo en COMPRA o ANULACION
+    if (costo == null || costo === 0) {
+      const sub = m.subtipoMovimiento ?? '';
+      if (sub === 'COMPRA' || sub === 'NOTA_CREDITO_COMPRA' || esInval) {
         anomalias.push({ ...m, _precioRef: null, _desvPct: null, _tipo_alerta: 'COSTO_CERO' });
-        continue;
       }
+      continue;
+    }
 
-      // Regla 2: Anulación revierte a precio diferente al de la compra/nota original
-      // Compra Doc 4420 @ $2.7598 → ANULACION_INGRESO_COMPRA Doc 4420 @ $2.7673 → ERROR
-      if (esInval && m.numeroDocumento) {
-        const docKey  = `${m._empresa}_${m.productoId}_${m.numeroDocumento}`;
-        const origDoc = comprasPorDoc.get(docKey);
-        if (origDoc && Math.abs(costo - origDoc.costoUnitario) > 0.001) {
-          const desv = Math.abs(costo - origDoc.costoUnitario) / origDoc.costoUnitario;
-          anomalias.push({ ...m,
-            _precioRef: origDoc.costoUnitario,
-            _delta:     costo - origDoc.costoUnitario,
-            _desvPct:   (desv * 100).toFixed(2),
-            _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
-          });
-        }
+    // Regla 2: anulación revierte a precio diferente al de la compra original
+    // Compra Doc 4420 @ $2.7598 → ANULACION_INGRESO_COMPRA Doc 4420 @ $2.7673 → ERROR
+    if (esInval) {
+      let origDoc = null;
+      // Método preferido: documentoReferencia apunta al id del movimiento original
+      if (m.documentoReferencia != null) origDoc = movsPorId.get(m.documentoReferencia) ?? null;
+      // Fallback: misma empresa + mismo número de documento
+      if (!origDoc && m.numeroDocumento) {
+        const candidatos = comprasPorDoc.get(`${m._empresa}_${m.numeroDocumento}`) ?? [];
+        if (candidatos.length === 1) origDoc = candidatos[0];
+      }
+      if (origDoc && Math.abs(costo - origDoc.costoUnitario) > 0.001) {
+        const desv = Math.abs(costo - origDoc.costoUnitario) / origDoc.costoUnitario;
+        anomalias.push({ ...m,
+          _precioRef: origDoc.costoUnitario,
+          _delta:     costo - origDoc.costoUnitario,
+          _desvPct:   (desv * 100).toFixed(2),
+          _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
+        });
       }
     }
   }
 
-  return { total: movimientos.length, grupos: grupos.size, anomalias };
+  return { total: movimientos.length, grupos: productosUnicos, anomalias };
 }
 
 function renderKardex({ total, grupos, anomalias }) {
