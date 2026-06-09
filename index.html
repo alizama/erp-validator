@@ -1715,7 +1715,7 @@ async function runKardex() {
         if (!ubId || !fecha) continue;
         try {
           const c   = { ...cfg(), idcompany: a._empresa };
-          const raw = await apiGet(`/BodegaDistribucion/kardex/${ubId}`, { desde: fecha, hasta: fecha, page: 1, pageSize: 100 }, c);
+          const raw = await apiGet('/BodegaDistribucion/kardex', { ubicacionId: ubId, desde: fecha, hasta: fecha, page: 1, pageSize: 100 }, c);
           const movs = Array.isArray(raw?.movimientos) ? raw.movimientos
                      : Array.isArray(raw?.data)        ? raw.data
                      : Array.isArray(raw)              ? raw : [];
