@@ -1687,8 +1687,10 @@ async function runKardex() {
           m._empresa      = empId;
           m._empresaNombre = COMPANY_NAMES[empId] ?? empId;
           // Normalizar campos de producto (el API puede usar distintos nombres)
-          m._productoId   = m.productoId   ?? m.idProducto  ?? m.productId  ?? null;
-          m._productoNombre = m.nombreProducto ?? m.producto ?? m.nombre ?? m.productName ?? null;
+          // productoId=0 en cabecera de COMPRA/ANULACION → el ID real está en detalles[0]
+          const pidHeader = m.productoId ?? m.idProducto ?? m.productId ?? null;
+          m._productoId   = (pidHeader && pidHeader !== 0) ? pidHeader : (m.detalles?.[0]?.productoId ?? null);
+          m._productoNombre = m.nombreProducto ?? m.producto ?? m.nombre ?? m.productName ?? m.detalles?.[0]?.nombreProducto ?? null;
         });
         todosMovimientos = todosMovimientos.concat(movs);
       } catch(e) { log(`  ⚠ Empresa ${empId}: ${e.message}`, 'warn'); }
@@ -1723,6 +1725,15 @@ async function runKardex() {
         if (!origCompra) {
           log(`  Anulac doc=${docNum}: compra origen no en período — sin WA de referencia`, 'warn');
           continue;
+        }
+        // ── Log del detalles de la ANULACIÓN (desde consolidado) ──────────────
+        log(`  ANULAC doc=${docNum}: header.costoU=${a.costoUnitario} detalles=${JSON.stringify(a.detalles)}`, 'inf');
+        // Comparación directa detalles: ¿difieren los costos al nivel de línea?
+        const costoDetAnul = a.detalles?.[0]?.costoUnitario ?? null;
+        const costoDetComp = origCompra.detalles?.[0]?.costoUnitario ?? null;
+        if (costoDetAnul != null && costoDetComp != null && Math.abs(costoDetAnul - costoDetComp) > 0.0001) {
+          log(`  ⚠ DISCREPANCIA DIRECTA doc=${docNum}: compra.detalles.costoU=${costoDetComp} ≠ anulac.detalles.costoU=${costoDetAnul}`, 'warn');
+          a._deltaDirecto = costoDetAnul - costoDetComp;
         }
         const ubId  = origCompra.ubicacionConsultaId ?? origCompra.ubicacionOrigenId ?? null;
         const fecha = (origCompra.fechaMovimiento ?? '').slice(0, 10);
@@ -1790,12 +1801,12 @@ function validarPreciosKardex(movimientos) {
   // El impacto real en inventario usa el WA vigente al momento de la anulación.
   // Si WA vigente ≠ precio original compra → hay diferencia de valoración (Δ = qty × |WA - P_orig|).
   //
-  // Agrupamos los movimientos que SÍ tienen productoId (excluye anulaciones con prodId=0)
-  // y reconstruimos el WA para cada grupo en orden cronológico.
+  // Agrupamos por _productoId (normalizado: usa detalles[0].productoId si header=0)
+  // Incluye COMPRA, ANULACION y SALIDA — todos contribuyen al cálculo del WA.
   const grupos = new Map();
   for (const m of movimientos) {
-    const pid = m.productoId;
-    if (!pid || pid === 0) continue;
+    const pid = m._productoId;
+    if (!pid) continue;
     const key = `${m._empresa}_${pid}_${m.ubicacionConsultaId}`;
     if (!grupos.has(key)) grupos.set(key, []);
     grupos.get(key).push(m);
@@ -1831,12 +1842,10 @@ function validarPreciosKardex(movimientos) {
     }
   }
 
-  // ── Calcular WA vigente al momento de una anulación ───────────────────────
-  // La anulación (productoId=0) no está en los grupos. Para hallar el WA
-  // vigente en la fecha de la anulación, tomamos el último WA registrado
-  // en el grupo (empresa, origProdId, bodega) hasta esa fecha.
+  // ── Calcular WA vigente al momento de una anulación ─────────────────────
   function waVigenteParaAnulacion(anulacion, origCompra) {
-    const key = `${anulacion._empresa}_${origCompra.productoId}_${anulacion.ubicacionConsultaId}`;
+    const pid = origCompra._productoId ?? origCompra.detalles?.[0]?.productoId ?? origCompra.productoId;
+    const key = `${anulacion._empresa}_${pid}_${anulacion.ubicacionConsultaId}`;
     const movs = grupos.get(key) ?? [];
     // El WA después de procesar el último movimiento antes o igual a la fecha de anulación
     const fechaAnul = new Date(anulacion.fechaMovimiento);
