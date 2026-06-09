@@ -1702,31 +1702,56 @@ async function runKardex() {
 
     _kxAllMovimientos = todosMovimientos;
 
-    // Fetch costo real (sin normalizar) vía endpoint por bodega para cada anulación.
-    // El consolidado normaliza costoUnitario de ANULACION al precio original de la compra.
-    // El endpoint por bodega devuelve los datos crudos tal como están en la DB.
+    // Para cada anulación, buscar el movimiento de COMPRA origen vía endpoint por bodega.
+    // El movimiento de COMPRA en el endpoint por bodega incluye saldoCostoUnitario = WA
+    // vigente DESPUÉS de procesar esa compra. Ese WA es exactamente lo que el ERP debería
+    // haber usado al revertir (pero en cambio usa el precio original de la compra).
     const anulaciones = todosMovimientos.filter(m => esMovimientoInvalidacion(m));
+    let primerCamposLogueados = false;
     if (anulaciones.length > 0) {
-      log(`  Verificando costo real de ${anulaciones.length} anulaciones (por bodega)...`, 'inf');
+      log(`  Buscando WA de compra-origen para ${anulaciones.length} anulaciones...`, 'inf');
       document.getElementById('kx-status').textContent = `Verificando ${anulaciones.length} anulaciones...`;
       for (const a of anulaciones) {
-        const ubId  = a.ubicacionConsultaId ?? a.ubicacionOrigenId ?? null;
-        const fecha = (a.fechaMovimiento ?? '').slice(0, 10);
+        const docNum = a.numeroDocumento;
+        if (!docNum) continue;
+        // Buscar la compra original en los movimientos ya cargados
+        const origCompra = todosMovimientos.find(m =>
+          m.numeroDocumento === docNum &&
+          m._empresa === a._empresa &&
+          (m.subtipoMovimiento === 'COMPRA' || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA')
+        );
+        if (!origCompra) {
+          log(`  Anulac doc=${docNum}: compra origen no en período — sin WA de referencia`, 'warn');
+          continue;
+        }
+        const ubId  = origCompra.ubicacionConsultaId ?? origCompra.ubicacionOrigenId ?? null;
+        const fecha = (origCompra.fechaMovimiento ?? '').slice(0, 10);
         if (!ubId || !fecha) continue;
         try {
-          const c   = { ...cfg(), idcompany: a._empresa };
-          const raw = await apiGet('/BodegaDistribucion/kardex', { ubicacionId: ubId, desde: fecha, hasta: fecha, page: 1, pageSize: 100 }, c);
+          const cc  = { ...cfg(), idcompany: a._empresa };
+          const raw = await apiGet('/BodegaDistribucion/kardex', { ubicacionId: ubId, desde: fecha, hasta: fecha, page: 1, pageSize: 100 }, cc);
           const movs = Array.isArray(raw?.movimientos) ? raw.movimientos
                      : Array.isArray(raw?.data)        ? raw.data
                      : Array.isArray(raw)              ? raw : [];
-          const mov = movs.find(m => m.id === a.id || String(m.id) === String(a.id));
-          if (mov?.costoUnitario != null) {
-            a._costoRealAnulacion = mov.costoUnitario;
-            a._costoTotalReal     = mov.costoTotal ?? null;
-            log(`  Anulac doc=${a.numeroDocumento}: costoReal=${mov.costoUnitario} totalReal=${mov.costoTotal}`, 'inf');
+          const compMov = movs.find(m => m.id === origCompra.id || String(m.id) === String(origCompra.id));
+          if (compMov) {
+            if (!primerCamposLogueados) {
+              primerCamposLogueados = true;
+              log(`  COMPRA campos disponibles: ${Object.keys(compMov).join(', ')}`, 'inf');
+            }
+            // saldoCostoUnitario = WA del inventario DESPUÉS de procesar esta compra
+            // Eso es exactamente el costo que debería usarse al anular
+            const waCompra = compMov.saldoCostoUnitario ?? compMov.saldoCosto ?? compMov.costoPromedio ?? compMov.precioPromedio ?? null;
+            const saldoCant = compMov.saldoCantidad ?? compMov.saldoQty ?? null;
+            log(`  COMPRA doc=${docNum}: costoU=${compMov.costoUnitario} saldoCostoU=${compMov.saldoCostoUnitario} saldoCant=${saldoCant} → WA=${waCompra}`, 'inf');
+            a._waCompra      = waCompra != null ? +waCompra : null;
+            a._origCompraCosto = +origCompra.costoUnitario;
+            a._origCompraId    = origCompra.id;
+          } else {
+            log(`  COMPRA doc=${docNum}: movimiento id=${origCompra.id} no encontrado en bodega ${ubId} fecha ${fecha}`, 'warn');
           }
         } catch(e) {
-          log(`  ⚠ bodega ${ubId}: ${e.message}`, 'warn');
+          log(`  ⚠ compra bodega ${ubId}: ${e.message}`, 'warn');
         }
       }
     }
@@ -1793,7 +1818,7 @@ function validarPreciosKardex(movimientos) {
       waAntes.set(m.id, waActual);
       const sub  = m.subtipoMovimiento ?? '';
       const tipo = m.tipoMovimiento    ?? '';
-      if (sub === 'SALDO_INICIAL') {
+      if (sub === 'SALDO_INICIAL' || tipo === 'SALDO_INICIAL') {
         qty = +(m.cantidad ?? 0); valor = qty * +(m.costoUnitario ?? 0);
       } else if (tipo === 'ENTRADA') {
         qty   += +(m.cantidad ?? 0);
@@ -1821,7 +1846,7 @@ function validarPreciosKardex(movimientos) {
       if (new Date(m.fechaMovimiento) > fechaAnul) break;
       const sub  = m.subtipoMovimiento ?? '';
       const tipo = m.tipoMovimiento    ?? '';
-      if (sub === 'SALDO_INICIAL') {
+      if (sub === 'SALDO_INICIAL' || tipo === 'SALDO_INICIAL') {
         qty = +(m.cantidad ?? 0); valor = qty * +(m.costoUnitario ?? 0);
       } else if (tipo === 'ENTRADA') {
         qty   += +(m.cantidad ?? 0);
@@ -1851,8 +1876,9 @@ function validarPreciosKardex(movimientos) {
       continue;
     }
 
-    // Regla 2: anulación — WA vigente al momento de anular ≠ precio original de la compra
-    // Indica que el inventario fue ajustado a un valor diferente al registrado en la factura.
+    // Regla 2: anulación — WA al momento de reversar ≠ precio original de la compra
+    // Fuente de WA preferida: saldoCostoUnitario de la COMPRA origen (endpoint por bodega).
+    // Fallback: reconstrucción desde movimientos del período (limitada sin SALDO_INICIAL).
     if (esInval && m.numeroDocumento) {
       const candidatos = comprasPorDoc.get(`${m._empresa}_${m.numeroDocumento}`) ?? [];
       const origCompra = candidatos.length === 1
@@ -1861,19 +1887,27 @@ function validarPreciosKardex(movimientos) {
           ?? null;
       if (!origCompra) continue;
 
-      const waVigente = waVigenteParaAnulacion(m, origCompra);
-      const diffUnit  = Math.abs(waVigente - origCompra.costoUnitario);
-      const impacto   = diffUnit * +(m.cantidad ?? 0);
+      // _waCompra = saldoCostoUnitario de la COMPRA vía endpoint por bodega
+      // Ese saldo ES el WA del inventario después de registrar la compra.
+      // Si no hay movimientos entre compra y anulación, también es el WA al momento de anular.
+      const waVigente = m._waCompra != null
+        ? m._waCompra
+        : waVigenteParaAnulacion(m, origCompra);
+
+      const precioOrig = m._origCompraCosto ?? origCompra.costoUnitario;
+      const diffUnit   = Math.abs(waVigente - precioOrig);
+      const impacto    = diffUnit * +(m.cantidad ?? 0);
 
       if (impacto > 0.01) {
-        const desv = origCompra.costoUnitario > 0 ? diffUnit / origCompra.costoUnitario : 0;
+        const desv = precioOrig > 0 ? diffUnit / precioOrig : 0;
         anomalias.push({ ...m,
-          _precioRef:  origCompra.costoUnitario,
+          _precioRef:  precioOrig,
           _waVigente:  waVigente,
-          _delta:      waVigente - origCompra.costoUnitario,
+          _delta:      waVigente - precioOrig,
           _impacto:    impacto,
           _desvPct:    (desv * 100).toFixed(2),
           _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
+          _waFuente:   m._waCompra != null ? 'bodega' : 'reconstruccion',
         });
       }
     }
