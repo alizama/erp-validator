@@ -342,7 +342,7 @@
           <thead><tr>
             <th>Empresa</th><th>Producto</th><th>Bodega</th><th>Fecha</th>
             <th>Subtipo</th><th>N° Doc</th>
-            <th>Costo Registrado</th><th>Prom. Compras</th><th>Δ%</th><th>Alerta</th>
+            <th>P. Original Compra</th><th>WA al Anular</th><th>Impacto $</th><th>Alerta</th>
           </tr></thead>
           <tbody id="tb-kardex"><tr><td colspan="10"><div class="empty">Sin datos</div></td></tr></tbody>
         </table>
@@ -1750,78 +1750,131 @@ function esMovimientoInvalidacion(m) {
 }
 
 function validarPreciosKardex(movimientos) {
-  // Índice por id de movimiento — clave numérica Y string para evitar mismatch de tipo
-  const movsPorId = new Map();
-  for (const m of movimientos) {
-    if (m.id != null) {
-      movsPorId.set(m.id, m);
-      movsPorId.set(String(m.id), m);
-    }
-  }
-
-  // Índice fallback: compras por empresa+numeroDocumento
+  // ── Índice de compras por empresa+doc ──────────────────────────────────────
   const comprasPorDoc = new Map();
   for (const m of movimientos) {
-    const esOrigen = m.subtipoMovimiento === 'COMPRA'
-                  || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA';
-    if (esOrigen && m.costoUnitario > 0 && m.numeroDocumento) {
+    if ((m.subtipoMovimiento === 'COMPRA' || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA')
+        && m.costoUnitario > 0 && m.numeroDocumento) {
       const key = `${m._empresa}_${m.numeroDocumento}`;
       if (!comprasPorDoc.has(key)) comprasPorDoc.set(key, []);
       comprasPorDoc.get(key).push(m);
     }
   }
 
+  // ── Reconstrucción del Promedio Ponderado por (empresa, productoId, bodega) ─
+  // El ERP almacena el precio original de la compra en la anulación (normalizado).
+  // El impacto real en inventario usa el WA vigente al momento de la anulación.
+  // Si WA vigente ≠ precio original compra → hay diferencia de valoración (Δ = qty × |WA - P_orig|).
+  //
+  // Agrupamos los movimientos que SÍ tienen productoId (excluye anulaciones con prodId=0)
+  // y reconstruimos el WA para cada grupo en orden cronológico.
+  const grupos = new Map();
+  for (const m of movimientos) {
+    const pid = m.productoId;
+    if (!pid || pid === 0) continue;
+    const key = `${m._empresa}_${pid}_${m.ubicacionConsultaId}`;
+    if (!grupos.has(key)) grupos.set(key, []);
+    grupos.get(key).push(m);
+  }
+  // Ordenar cada grupo cronológicamente (por fecha, luego por id para desempate)
+  for (const [, movs] of grupos) {
+    movs.sort((a, b) => {
+      const d = new Date(a.fechaMovimiento) - new Date(b.fechaMovimiento);
+      return d !== 0 ? d : (a.id ?? 0) - (b.id ?? 0);
+    });
+  }
+  // Construir tabla de WA antes de cada movimiento (snapshot antes de procesar)
+  // Key: movimiento.id → WA justo antes de ese movimiento
+  const waAntes = new Map();
+  for (const [, movs] of grupos) {
+    let qty = 0, valor = 0;
+    for (const m of movs) {
+      const waActual = qty > 0.001 ? valor / qty : (m.costoUnitario ?? 0);
+      waAntes.set(m.id, waActual);
+      const sub  = m.subtipoMovimiento ?? '';
+      const tipo = m.tipoMovimiento    ?? '';
+      if (sub === 'SALDO_INICIAL') {
+        qty = +(m.cantidad ?? 0); valor = qty * +(m.costoUnitario ?? 0);
+      } else if (tipo === 'ENTRADA') {
+        qty   += +(m.cantidad ?? 0);
+        valor += +(m.cantidad ?? 0) * +(m.costoUnitario ?? 0);
+      } else if (tipo === 'SALIDA') {
+        // las salidas reducen inventario al WA actual
+        qty   -= +(m.cantidad ?? 0);
+        valor -= +(m.cantidad ?? 0) * waActual;
+        if (qty < 0.001) { qty = 0; valor = 0; }
+      }
+    }
+  }
+
+  // ── Calcular WA vigente al momento de una anulación ───────────────────────
+  // La anulación (productoId=0) no está en los grupos. Para hallar el WA
+  // vigente en la fecha de la anulación, tomamos el último WA registrado
+  // en el grupo (empresa, origProdId, bodega) hasta esa fecha.
+  function waVigenteParaAnulacion(anulacion, origCompra) {
+    const key = `${anulacion._empresa}_${origCompra.productoId}_${anulacion.ubicacionConsultaId}`;
+    const movs = grupos.get(key) ?? [];
+    // El WA después de procesar el último movimiento antes o igual a la fecha de anulación
+    const fechaAnul = new Date(anulacion.fechaMovimiento);
+    let qty = 0, valor = 0;
+    for (const m of movs) {
+      if (new Date(m.fechaMovimiento) > fechaAnul) break;
+      const sub  = m.subtipoMovimiento ?? '';
+      const tipo = m.tipoMovimiento    ?? '';
+      if (sub === 'SALDO_INICIAL') {
+        qty = +(m.cantidad ?? 0); valor = qty * +(m.costoUnitario ?? 0);
+      } else if (tipo === 'ENTRADA') {
+        qty   += +(m.cantidad ?? 0);
+        valor += +(m.cantidad ?? 0) * +(m.costoUnitario ?? 0);
+      } else if (tipo === 'SALIDA') {
+        const wa = qty > 0.001 ? valor / qty : 0;
+        qty   -= +(m.cantidad ?? 0);
+        valor -= +(m.cantidad ?? 0) * wa;
+        if (qty < 0.001) { qty = 0; valor = 0; }
+      }
+    }
+    return qty > 0.001 ? valor / qty : origCompra.costoUnitario;
+  }
+
+  // ── Anomalías ──────────────────────────────────────────────────────────────
   const productosUnicos = new Set(movimientos.map(m => `${m._empresa}_${m._productoId}`)).size;
   const anomalias = [];
 
   for (const m of movimientos) {
-    if (m.subtipoMovimiento === 'SALDO_INICIAL' || m.tipoMovimiento === 'SALDO_INICIAL') continue;
-    const costo   = m.costoUnitario;
+    const sub     = m.subtipoMovimiento ?? '';
     const esInval = esMovimientoInvalidacion(m);
 
-    // Regla 1: costo cero/nulo en COMPRA o ANULACION
-    if (costo == null || costo === 0) {
-      const sub = m.subtipoMovimiento ?? '';
-      if (sub === 'COMPRA' || sub === 'NOTA_CREDITO_COMPRA' || esInval) {
-        anomalias.push({ ...m, _precioRef: null, _desvPct: null, _tipo_alerta: 'COSTO_CERO' });
-      }
+    // Regla 1: costo cero en COMPRA o ANULACION
+    if ((m.costoUnitario == null || m.costoUnitario === 0)
+        && (sub === 'COMPRA' || sub === 'NOTA_CREDITO_COMPRA' || esInval)) {
+      anomalias.push({ ...m, _precioRef: null, _desvPct: null, _tipo_alerta: 'COSTO_CERO' });
       continue;
     }
 
-    // Regla 2: anulación revierte a precio diferente al del ingreso original
-    if (esInval) {
-      // costoEfectivo: si fetcheamos el movimiento individual, usamos ese valor (sin normalizar);
-      // si no, usamos lo que devolvió el consolidado (puede estar normalizado)
-      const costoEfectivo      = m._costoRealAnulacion ?? costo;
-      const costoTotalEfectivo = m._costoTotalReal     ?? m.costoTotal ?? 0;
+    // Regla 2: anulación — WA vigente al momento de anular ≠ precio original de la compra
+    // Indica que el inventario fue ajustado a un valor diferente al registrado en la factura.
+    if (esInval && m.numeroDocumento) {
+      const candidatos = comprasPorDoc.get(`${m._empresa}_${m.numeroDocumento}`) ?? [];
+      const origCompra = candidatos.length === 1
+        ? candidatos[0]
+        : candidatos.sort((a, b) => Math.abs(a.costoTotal - (m.costoTotal ?? 0)) - Math.abs(b.costoTotal - (m.costoTotal ?? 0)))[0]
+          ?? null;
+      if (!origCompra) continue;
 
-      let origDoc = null;
-      // Empresa+numeroDocumento (el consolidado normaliza costoUnitario; comparamos contra la compra original)
-      if (m.numeroDocumento) {
-        const candidatos = comprasPorDoc.get(`${m._empresa}_${m.numeroDocumento}`) ?? [];
-        if (candidatos.length === 1) origDoc = candidatos[0];
-        else if (candidatos.length > 1) {
-          // Si hay varios, buscar el que tenga el costoTotal más cercano a la anulación
-          const sorted = [...candidatos].sort((a, b) =>
-            Math.abs(a.costoTotal - costoTotalEfectivo) - Math.abs(b.costoTotal - costoTotalEfectivo)
-          );
-          origDoc = sorted[0];
-        }
-      }
+      const waVigente = waVigenteParaAnulacion(m, origCompra);
+      const diffUnit  = Math.abs(waVigente - origCompra.costoUnitario);
+      const impacto   = diffUnit * +(m.cantidad ?? 0);
 
-      if (origDoc) {
-        const diffUnit  = Math.abs(costoEfectivo - origDoc.costoUnitario);
-        const diffTotal = Math.abs(costoTotalEfectivo - (origDoc.costoTotal ?? 0));
-        if (diffUnit > 0.001 || diffTotal > 0.01) {
-          const desv = origDoc.costoUnitario > 0 ? diffUnit / origDoc.costoUnitario : 0;
-          anomalias.push({ ...m,
-            _precioRef:  origDoc.costoUnitario,
-            _totalRef:   origDoc.costoTotal,
-            _delta:      costoEfectivo - origDoc.costoUnitario,
-            _desvPct:    (desv * 100).toFixed(2),
-            _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
-          });
-        }
+      if (impacto > 0.01) {
+        const desv = origCompra.costoUnitario > 0 ? diffUnit / origCompra.costoUnitario : 0;
+        anomalias.push({ ...m,
+          _precioRef:  origCompra.costoUnitario,
+          _waVigente:  waVigente,
+          _delta:      waVigente - origCompra.costoUnitario,
+          _impacto:    impacto,
+          _desvPct:    (desv * 100).toFixed(2),
+          _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
+        });
       }
     }
   }
@@ -1901,10 +1954,11 @@ function renderKardexRows(rows) {
       <td>${fecha}</td>
       <td><span class="tag tinf">${m.subtipoMovimiento??m.tipoMovimiento??'—'}</span></td>
       <td style="font-family:var(--mono);font-size:10px">${m.numeroDocumento??'—'}</td>
-      <td style="font-family:var(--mono)">${fmt2(m.costoUnitario)}</td>
-      <td style="font-family:var(--mono);color:var(--muted)">${fmt2(m._precioRef)}</td>
-      <td style="font-family:var(--mono);color:${m._delta>0?'var(--danger)':'var(--warn)'}">
-        ${m._desvPct != null ? (m._delta > 0 ? '+' : '') + m._desvPct + '%' : '—'}</td>
+      <td style="font-family:var(--mono)">${fmt2(m._precioRef ?? m.costoUnitario)}</td>
+      <td style="font-family:var(--mono);color:${m._waVigente != null && m._delta != null && Math.abs(m._delta) > 0.001 ? 'var(--danger)' : 'var(--muted)'}">
+        ${m._waVigente != null ? fmt2(m._waVigente) : '—'}</td>
+      <td style="font-family:var(--mono);font-weight:600;color:var(--danger)">
+        ${m._impacto != null ? '$' + m._impacto.toFixed(2) : '—'}</td>
       <td>${ALERTA_LABEL[m._tipo_alerta]??''} ${verOCBtn}</td>
     </tr>`;
   }).join('');
@@ -1954,16 +2008,16 @@ function exportKardexCSV() {
   const rows = document.getElementById('kx_filtro').value === 'todos'
     ? _kxAllMovimientos : anomalias;
   if (!rows.length) return;
-  const header = 'Empresa,Producto,Bodega,Fecha,Subtipo,N° Doc,Costo Registrado,Prom. Compras,Δ%,Alerta';
-  const fmt2 = n => n != null ? n.toFixed(2) : '';
+  const header = 'Empresa,Producto,Bodega,Fecha,Subtipo,N° Doc,Precio Orig. Compra,WA al Anular,Impacto $,Alerta';
+  const fmt2 = n => n != null ? n.toFixed(4) : '';
   const lines = rows.map(m => [
     m._empresaNombre, m._productoNombre??'',
     m.ubicacionConsultaNombre??m.ubicacionOrigenNombre??'',
     (m.fechaMovimiento??'').slice(0,10),
     m.subtipoMovimiento??m.tipoMovimiento??'',
     m.numeroDocumento??'',
-    fmt2(m.costoUnitario), fmt2(m._precioRef),
-    m._desvPct??'', m._tipo_alerta??''
+    fmt2(m._precioRef ?? m.costoUnitario), fmt2(m._waVigente),
+    m._impacto != null ? m._impacto.toFixed(2) : '', m._tipo_alerta??''
   ].map(v => `"${String(v).replace(/"/g,'""')}"`).join(','));
   const blob = new Blob([header+'\n'+lines.join('\n')],{type:'text/csv'});
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
