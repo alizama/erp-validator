@@ -1709,7 +1709,6 @@ async function runKardex() {
     // vigente DESPUÉS de procesar esa compra. Ese WA es exactamente lo que el ERP debería
     // haber usado al revertir (pero en cambio usa el precio original de la compra).
     const anulaciones = todosMovimientos.filter(m => esMovimientoInvalidacion(m));
-    let primerCamposLogueados = false;
     if (anulaciones.length > 0) {
       log(`  Buscando WA de compra-origen para ${anulaciones.length} anulaciones...`, 'inf');
       document.getElementById('kx-status').textContent = `Verificando ${anulaciones.length} anulaciones...`;
@@ -1726,15 +1725,6 @@ async function runKardex() {
           log(`  Anulac doc=${docNum}: compra origen no en período — sin WA de referencia`, 'warn');
           continue;
         }
-        // ── Log del detalles de la ANULACIÓN (desde consolidado) ──────────────
-        log(`  ANULAC doc=${docNum}: header.costoU=${a.costoUnitario} detalles=${JSON.stringify(a.detalles)}`, 'inf');
-        // Comparación directa detalles: ¿difieren los costos al nivel de línea?
-        const costoDetAnul = a.detalles?.[0]?.costoUnitario ?? null;
-        const costoDetComp = origCompra.detalles?.[0]?.costoUnitario ?? null;
-        if (costoDetAnul != null && costoDetComp != null && Math.abs(costoDetAnul - costoDetComp) > 0.0001) {
-          log(`  ⚠ DISCREPANCIA DIRECTA doc=${docNum}: compra.detalles.costoU=${costoDetComp} ≠ anulac.detalles.costoU=${costoDetAnul}`, 'warn');
-          a._deltaDirecto = costoDetAnul - costoDetComp;
-        }
         const ubId  = origCompra.ubicacionConsultaId ?? origCompra.ubicacionOrigenId ?? null;
         const fecha = (origCompra.fechaMovimiento ?? '').slice(0, 10);
         if (!ubId || !fecha) continue;
@@ -1746,15 +1736,8 @@ async function runKardex() {
                      : Array.isArray(raw)              ? raw : [];
           const compMov = movs.find(m => m.id === origCompra.id || String(m.id) === String(origCompra.id));
           if (compMov) {
-            if (!primerCamposLogueados) {
-              primerCamposLogueados = true;
-              // Logear JSON completo del primer movimiento para ver valores de detalles/observaciones
-              try { log(`  COMPRA JSON completo: ${JSON.stringify(compMov)}`, 'inf'); } catch(_) {}
-            }
-            const waCompra = compMov.saldoCostoUnitario ?? compMov.saldoCosto ?? compMov.costoPromedio ?? compMov.precioPromedio ?? null;
-            const saldoCant = compMov.saldoCantidad ?? compMov.saldoQty ?? null;
-            log(`  COMPRA doc=${docNum}: costoU=${compMov.costoUnitario} detalles=${JSON.stringify(compMov.detalles)} obs=${compMov.observaciones} ref=${compMov.referencia} → WA=${waCompra}`, 'inf');
-            a._waCompra      = waCompra != null ? +waCompra : null;
+            const waCompra = compMov.saldoCostoUnitario ?? compMov.saldoCosto ?? compMov.costoPromedio ?? null;
+            a._waCompra        = waCompra != null ? +waCompra : null;
             a._origCompraCosto = +origCompra.costoUnitario;
             a._origCompraId    = origCompra.id;
           } else {
