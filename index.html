@@ -1702,29 +1702,24 @@ async function runKardex() {
 
     _kxAllMovimientos = todosMovimientos;
 
-    // DEBUG — ver qué valores reales tiene subtipoMovimiento
-    const subtiposUnicos = [...new Set(todosMovimientos.map(m => m.subtipoMovimiento ?? '(null)'))].sort();
-    log(`  DEBUG subtipoMovimiento únicos: ${subtiposUnicos.join(' | ')}`, 'inf');
-    const anulaciones = todosMovimientos.filter(m => {
-      const s = (m.subtipoMovimiento ?? '').toUpperCase();
-      return s.includes('ANULAC') || s.includes('INVALID') || s.includes('REVERS');
-    });
-    log(`  DEBUG candidatos invalidación: ${anulaciones.length} movs`, anulaciones.length > 0 ? 'ok' : 'warn');
-    // Construir movsPorId para debug
-    const _dbgById = new Map();
-    todosMovimientos.forEach(m => { if (m.id != null) { _dbgById.set(m.id, m); _dbgById.set(String(m.id), m); } });
-    for (const a of anulaciones) {
-      const origById = a.documentoIngresoId != null
-        ? (_dbgById.get(a.documentoIngresoId) ?? _dbgById.get(String(a.documentoIngresoId)) ?? null)
-        : null;
-      const cands = todosMovimientos.filter(m =>
-        m._empresa === a._empresa && m.numeroDocumento === a.numeroDocumento &&
-        (m.subtipoMovimiento === 'COMPRA' || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA')
-      );
-      const matchSrc = origById ? `ingresoId→id OK (costo=${origById.costoUnitario} total=${origById.costoTotal})` : `ingresoId MISS / fallback cands=${cands.length}`;
-      const diffU = origById ? Math.abs(a.costoUnitario - origById.costoUnitario).toFixed(4) : '?';
-      const diffT = origById ? Math.abs((a.costoTotal??0) - (origById.costoTotal??0)).toFixed(2) : '?';
-      log(`  ANULAC doc=${a.numeroDocumento} costoAnul=${a.costoUnitario} totalAnul=${a.costoTotal} | ${matchSrc} | ΔU=${diffU} ΔT=${diffT}`, 'inf');
+    // Fetch costo real (no normalizado) de cada anulación vía endpoint individual
+    const anulaciones = todosMovimientos.filter(m => esMovimientoInvalidacion(m));
+    if (anulaciones.length > 0) {
+      log(`  Verificando costo real de ${anulaciones.length} anulaciones...`, 'inf');
+      document.getElementById('kx-status').textContent = `Verificando ${anulaciones.length} anulaciones...`;
+      for (const a of anulaciones) {
+        try {
+          const c = { ...cfg(), idcompany: a._empresa };
+          const raw = await apiGet(`/BodegaDistribucion/kardex/movimiento/${a.id}`, {}, c);
+          if (raw?.costoUnitario != null) {
+            a._costoRealAnulacion  = raw.costoUnitario;
+            a._costoTotalReal      = raw.costoTotal ?? null;
+            log(`  Anulac doc=${a.numeroDocumento} id=${a.id}: costoReal=${raw.costoUnitario} totalReal=${raw.costoTotal}`, 'inf');
+          }
+        } catch(e) {
+          log(`  ⚠ movimiento ${a.id}: ${e.message}`, 'warn');
+        }
+      }
     }
 
     const resultado = validarPreciosKardex(todosMovimientos);
@@ -1786,37 +1781,35 @@ function validarPreciosKardex(movimientos) {
 
     // Regla 2: anulación revierte a precio diferente al del ingreso original
     if (esInval) {
+      // costoEfectivo: si fetcheamos el movimiento individual, usamos ese valor (sin normalizar);
+      // si no, usamos lo que devolvió el consolidado (puede estar normalizado)
+      const costoEfectivo      = m._costoRealAnulacion ?? costo;
+      const costoTotalEfectivo = m._costoTotalReal     ?? m.costoTotal ?? 0;
+
       let origDoc = null;
-
-      // Método 1: documentoIngresoId → id del movimiento de ingreso original
-      if (m.documentoIngresoId != null) {
-        origDoc = movsPorId.get(m.documentoIngresoId) ?? movsPorId.get(String(m.documentoIngresoId)) ?? null;
-      }
-
-      // Método 2: documentoReferencia como id (en caso de que apunte al id del movimiento)
-      if (!origDoc && m.documentoReferencia != null) {
-        origDoc = movsPorId.get(m.documentoReferencia) ?? movsPorId.get(String(m.documentoReferencia)) ?? null;
-      }
-
-      // Método 3: empresa+numeroDocumento (fallback, sin productoId)
-      if (!origDoc && m.numeroDocumento) {
+      // Empresa+numeroDocumento (el consolidado normaliza costoUnitario; comparamos contra la compra original)
+      if (m.numeroDocumento) {
         const candidatos = comprasPorDoc.get(`${m._empresa}_${m.numeroDocumento}`) ?? [];
         if (candidatos.length === 1) origDoc = candidatos[0];
+        else if (candidatos.length > 1) {
+          // Si hay varios, buscar el que tenga el costoTotal más cercano a la anulación
+          const sorted = [...candidatos].sort((a, b) =>
+            Math.abs(a.costoTotal - costoTotalEfectivo) - Math.abs(b.costoTotal - costoTotalEfectivo)
+          );
+          origDoc = sorted[0];
+        }
       }
 
       if (origDoc) {
-        // Comparar costoUnitario Y costoTotal (el API puede normalizar uno pero no el otro)
-        const diffUnit  = Math.abs(costo - origDoc.costoUnitario);
-        const diffTotal = Math.abs((m.costoTotal ?? 0) - (origDoc.costoTotal ?? 0));
+        const diffUnit  = Math.abs(costoEfectivo - origDoc.costoUnitario);
+        const diffTotal = Math.abs(costoTotalEfectivo - (origDoc.costoTotal ?? 0));
         if (diffUnit > 0.001 || diffTotal > 0.01) {
-          const ref  = diffUnit > 0.001 ? origDoc.costoUnitario : origDoc.costoTotal;
-          const val  = diffUnit > 0.001 ? costo : (m.costoTotal ?? 0);
-          const desv = ref > 0 ? Math.abs(val - ref) / ref : 0;
+          const desv = origDoc.costoUnitario > 0 ? diffUnit / origDoc.costoUnitario : 0;
           anomalias.push({ ...m,
-            _precioRef: origDoc.costoUnitario,
-            _totalRef:  origDoc.costoTotal,
-            _delta:     costo - origDoc.costoUnitario,
-            _desvPct:   (desv * 100).toFixed(2),
+            _precioRef:  origDoc.costoUnitario,
+            _totalRef:   origDoc.costoTotal,
+            _delta:      costoEfectivo - origDoc.costoUnitario,
+            _desvPct:    (desv * 100).toFixed(2),
             _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
           });
         }
