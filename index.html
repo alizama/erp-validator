@@ -1710,14 +1710,21 @@ async function runKardex() {
       return s.includes('ANULAC') || s.includes('INVALID') || s.includes('REVERS');
     });
     log(`  DEBUG candidatos invalidación: ${anulaciones.length} movs`, anulaciones.length > 0 ? 'ok' : 'warn');
+    // Construir movsPorId para debug
+    const _dbgById = new Map();
+    todosMovimientos.forEach(m => { if (m.id != null) { _dbgById.set(m.id, m); _dbgById.set(String(m.id), m); } });
     for (const a of anulaciones) {
+      const origById = a.documentoIngresoId != null
+        ? (_dbgById.get(a.documentoIngresoId) ?? _dbgById.get(String(a.documentoIngresoId)) ?? null)
+        : null;
       const cands = todosMovimientos.filter(m =>
         m._empresa === a._empresa && m.numeroDocumento === a.numeroDocumento &&
         (m.subtipoMovimiento === 'COMPRA' || m.subtipoMovimiento === 'NOTA_CREDITO_COMPRA')
       );
-      const precios = cands.map(c => c.costoUnitario.toFixed(4)).join('/');
-      const diff = cands.map(c => Math.abs(c.costoUnitario - a.costoUnitario) > 0.001 ? '⚠DIFF' : 'ok').join('/');
-      log(`  ANULAC doc=${a.numeroDocumento} costoAnul=${a.costoUnitario.toFixed(4)} cands=${cands.length} preciosOrig=[${precios}] ${diff}`, 'inf');
+      const matchSrc = origById ? `ingresoId→id OK (costo=${origById.costoUnitario} total=${origById.costoTotal})` : `ingresoId MISS / fallback cands=${cands.length}`;
+      const diffU = origById ? Math.abs(a.costoUnitario - origById.costoUnitario).toFixed(4) : '?';
+      const diffT = origById ? Math.abs((a.costoTotal??0) - (origById.costoTotal??0)).toFixed(2) : '?';
+      log(`  ANULAC doc=${a.numeroDocumento} costoAnul=${a.costoUnitario} totalAnul=${a.costoTotal} | ${matchSrc} | ΔU=${diffU} ΔT=${diffT}`, 'inf');
     }
 
     const resultado = validarPreciosKardex(todosMovimientos);
@@ -1739,14 +1746,16 @@ function esMovimientoInvalidacion(m) {
 }
 
 function validarPreciosKardex(movimientos) {
-  // Índice 1: todos los movimientos por su id (para lookup vía documentoReferencia)
+  // Índice por id de movimiento — clave numérica Y string para evitar mismatch de tipo
   const movsPorId = new Map();
   for (const m of movimientos) {
-    if (m.id != null) movsPorId.set(m.id, m);
+    if (m.id != null) {
+      movsPorId.set(m.id, m);
+      movsPorId.set(String(m.id), m);
+    }
   }
 
-  // Índice 2: compras/NC por empresa+numeroDocumento — sin productoId porque
-  // las anulaciones devuelven productoId=0 y rompen el matching por ese campo
+  // Índice fallback: compras por empresa+numeroDocumento
   const comprasPorDoc = new Map();
   for (const m of movimientos) {
     const esOrigen = m.subtipoMovimiento === 'COMPRA'
@@ -1775,25 +1784,42 @@ function validarPreciosKardex(movimientos) {
       continue;
     }
 
-    // Regla 2: anulación revierte a precio diferente al de la compra original
-    // Compra Doc 4420 @ $2.7598 → ANULACION_INGRESO_COMPRA Doc 4420 @ $2.7673 → ERROR
+    // Regla 2: anulación revierte a precio diferente al del ingreso original
     if (esInval) {
       let origDoc = null;
-      // Método preferido: documentoReferencia apunta al id del movimiento original
-      if (m.documentoReferencia != null) origDoc = movsPorId.get(m.documentoReferencia) ?? null;
-      // Fallback: misma empresa + mismo número de documento
+
+      // Método 1: documentoIngresoId → id del movimiento de ingreso original
+      if (m.documentoIngresoId != null) {
+        origDoc = movsPorId.get(m.documentoIngresoId) ?? movsPorId.get(String(m.documentoIngresoId)) ?? null;
+      }
+
+      // Método 2: documentoReferencia como id (en caso de que apunte al id del movimiento)
+      if (!origDoc && m.documentoReferencia != null) {
+        origDoc = movsPorId.get(m.documentoReferencia) ?? movsPorId.get(String(m.documentoReferencia)) ?? null;
+      }
+
+      // Método 3: empresa+numeroDocumento (fallback, sin productoId)
       if (!origDoc && m.numeroDocumento) {
         const candidatos = comprasPorDoc.get(`${m._empresa}_${m.numeroDocumento}`) ?? [];
         if (candidatos.length === 1) origDoc = candidatos[0];
       }
-      if (origDoc && Math.abs(costo - origDoc.costoUnitario) > 0.001) {
-        const desv = Math.abs(costo - origDoc.costoUnitario) / origDoc.costoUnitario;
-        anomalias.push({ ...m,
-          _precioRef: origDoc.costoUnitario,
-          _delta:     costo - origDoc.costoUnitario,
-          _desvPct:   (desv * 100).toFixed(2),
-          _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
-        });
+
+      if (origDoc) {
+        // Comparar costoUnitario Y costoTotal (el API puede normalizar uno pero no el otro)
+        const diffUnit  = Math.abs(costo - origDoc.costoUnitario);
+        const diffTotal = Math.abs((m.costoTotal ?? 0) - (origDoc.costoTotal ?? 0));
+        if (diffUnit > 0.001 || diffTotal > 0.01) {
+          const ref  = diffUnit > 0.001 ? origDoc.costoUnitario : origDoc.costoTotal;
+          const val  = diffUnit > 0.001 ? costo : (m.costoTotal ?? 0);
+          const desv = ref > 0 ? Math.abs(val - ref) / ref : 0;
+          anomalias.push({ ...m,
+            _precioRef: origDoc.costoUnitario,
+            _totalRef:  origDoc.costoTotal,
+            _delta:     costo - origDoc.costoUnitario,
+            _desvPct:   (desv * 100).toFixed(2),
+            _tipo_alerta: 'INVALIDACION_PRECIO_INCORRECTO',
+          });
+        }
       }
     }
   }
