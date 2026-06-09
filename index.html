@@ -1737,13 +1737,12 @@ async function runKardex() {
           if (compMov) {
             if (!primerCamposLogueados) {
               primerCamposLogueados = true;
-              log(`  COMPRA campos disponibles: ${Object.keys(compMov).join(', ')}`, 'inf');
+              // Logear JSON completo del primer movimiento para ver valores de detalles/observaciones
+              try { log(`  COMPRA JSON completo: ${JSON.stringify(compMov)}`, 'inf'); } catch(_) {}
             }
-            // saldoCostoUnitario = WA del inventario DESPUÉS de procesar esta compra
-            // Eso es exactamente el costo que debería usarse al anular
             const waCompra = compMov.saldoCostoUnitario ?? compMov.saldoCosto ?? compMov.costoPromedio ?? compMov.precioPromedio ?? null;
             const saldoCant = compMov.saldoCantidad ?? compMov.saldoQty ?? null;
-            log(`  COMPRA doc=${docNum}: costoU=${compMov.costoUnitario} saldoCostoU=${compMov.saldoCostoUnitario} saldoCant=${saldoCant} → WA=${waCompra}`, 'inf');
+            log(`  COMPRA doc=${docNum}: costoU=${compMov.costoUnitario} detalles=${JSON.stringify(compMov.detalles)} obs=${compMov.observaciones} ref=${compMov.referencia} → WA=${waCompra}`, 'inf');
             a._waCompra      = waCompra != null ? +waCompra : null;
             a._origCompraCosto = +origCompra.costoUnitario;
             a._origCompraId    = origCompra.id;
