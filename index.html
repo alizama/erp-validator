@@ -1702,22 +1702,31 @@ async function runKardex() {
 
     _kxAllMovimientos = todosMovimientos;
 
-    // Fetch costo real (no normalizado) de cada anulación vía endpoint individual
+    // Fetch costo real (sin normalizar) vía endpoint por bodega para cada anulación.
+    // El consolidado normaliza costoUnitario de ANULACION al precio original de la compra.
+    // El endpoint por bodega devuelve los datos crudos tal como están en la DB.
     const anulaciones = todosMovimientos.filter(m => esMovimientoInvalidacion(m));
     if (anulaciones.length > 0) {
-      log(`  Verificando costo real de ${anulaciones.length} anulaciones...`, 'inf');
+      log(`  Verificando costo real de ${anulaciones.length} anulaciones (por bodega)...`, 'inf');
       document.getElementById('kx-status').textContent = `Verificando ${anulaciones.length} anulaciones...`;
       for (const a of anulaciones) {
+        const ubId  = a.ubicacionConsultaId ?? a.ubicacionOrigenId ?? null;
+        const fecha = (a.fechaMovimiento ?? '').slice(0, 10);
+        if (!ubId || !fecha) continue;
         try {
-          const c = { ...cfg(), idcompany: a._empresa };
-          const raw = await apiGet(`/BodegaDistribucion/kardex/movimiento/${a.id}`, {}, c);
-          if (raw?.costoUnitario != null) {
-            a._costoRealAnulacion  = raw.costoUnitario;
-            a._costoTotalReal      = raw.costoTotal ?? null;
-            log(`  Anulac doc=${a.numeroDocumento} id=${a.id}: costoReal=${raw.costoUnitario} totalReal=${raw.costoTotal}`, 'inf');
+          const c   = { ...cfg(), idcompany: a._empresa };
+          const raw = await apiGet(`/BodegaDistribucion/kardex/${ubId}`, { desde: fecha, hasta: fecha, page: 1, pageSize: 100 }, c);
+          const movs = Array.isArray(raw?.movimientos) ? raw.movimientos
+                     : Array.isArray(raw?.data)        ? raw.data
+                     : Array.isArray(raw)              ? raw : [];
+          const mov = movs.find(m => m.id === a.id || String(m.id) === String(a.id));
+          if (mov?.costoUnitario != null) {
+            a._costoRealAnulacion = mov.costoUnitario;
+            a._costoTotalReal     = mov.costoTotal ?? null;
+            log(`  Anulac doc=${a.numeroDocumento}: costoReal=${mov.costoUnitario} totalReal=${mov.costoTotal}`, 'inf');
           }
         } catch(e) {
-          log(`  ⚠ movimiento ${a.id}: ${e.message}`, 'warn');
+          log(`  ⚠ bodega ${ubId}: ${e.message}`, 'warn');
         }
       }
     }
